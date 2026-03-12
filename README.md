@@ -79,6 +79,7 @@ This submits one real job per model and polls to terminal status.
 - Set production env vars from `.env.local`.
 - Production branch: `main`.
 - Every merge to `main` auto-deploys.
+- Auto-deploy verification timestamp: 2026-03-12.
 
 ## Security
 
