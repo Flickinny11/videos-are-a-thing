@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+:root {
+  --background: #02040a;
+  --foreground: #eff8ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 700px at 10% -5%, rgba(34, 211, 238, 0.28), transparent 62%),
+    radial-gradient(900px 600px at 90% 20%, rgba(79, 70, 229, 0.32), transparent 65%),
+    linear-gradient(165deg, #030713 0%, #050b17 42%, #02040a 100%);
+  color: var(--foreground);
+  font-family: var(--font-outfit), sans-serif;
+}
+
+h1,
+h2,
+h3,
+button,
+label,
+select {
+  font-family: var(--font-orbitron), sans-serif;
+}
+
+.studio-grid {
+  background-image:
+    linear-gradient(rgba(135, 206, 250, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(135, 206, 250, 0.08) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
