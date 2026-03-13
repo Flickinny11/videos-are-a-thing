@@ -205,12 +205,19 @@ export async function POST(
     });
   } catch (error) {
     const parsed = parsePollError(error);
+    const status =
+      parsed.message === "Unauthorized"
+        ? 401
+        : parsed.message === "Job not found."
+          ? 404
+          : 500;
+
     return NextResponse.json(
       {
         success: false,
         message: parsed.message,
       },
-      { status: 500 },
+      { status },
     );
   }
 }
