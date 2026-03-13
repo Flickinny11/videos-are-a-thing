@@ -13,6 +13,61 @@ import { extractMediaUrlFromOutput, getRunpodJobStatus } from "@/lib/runpod";
 
 const TERMINAL = new Set(["COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"]);
 
+interface ParsedPollError {
+  httpStatus: number | null;
+  message: string;
+  raw: Record<string, unknown>;
+}
+
+const parsePollError = (error: unknown): ParsedPollError => {
+  if (!(error instanceof Error)) {
+    return {
+      httpStatus: null,
+      message: "Polling failed.",
+      raw: {},
+    };
+  }
+
+  let parsedRaw: Record<string, unknown> = {};
+  try {
+    const maybe = JSON.parse(error.message) as unknown;
+    if (maybe && typeof maybe === "object" && !Array.isArray(maybe)) {
+      parsedRaw = maybe as Record<string, unknown>;
+    }
+  } catch {
+    parsedRaw = {};
+  }
+
+  const httpStatus =
+    typeof parsedRaw.httpStatus === "number" && Number.isFinite(parsedRaw.httpStatus)
+      ? parsedRaw.httpStatus
+      : null;
+
+  const parsedMessageCandidates = [parsedRaw.error, parsedRaw.message];
+  const parsedMessage = parsedMessageCandidates.find((value) => typeof value === "string");
+
+  return {
+    httpStatus,
+    message:
+      typeof parsedMessage === "string" && parsedMessage.trim().length
+        ? parsedMessage
+        : error.message || "Polling failed.",
+    raw: parsedRaw,
+  };
+};
+
+const isTerminalRunpodPollError = (input: ParsedPollError): boolean => {
+  if (input.httpStatus === 404) return true;
+
+  const text = input.message.toLowerCase();
+  return (
+    text.includes("request does not exist") ||
+    text.includes("job does not exist") ||
+    text.includes("job not found") ||
+    text.includes("request not found")
+  );
+};
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -30,7 +85,41 @@ export async function POST(
       });
     }
 
-    const runpod = await getRunpodJobStatus(current.mode, current.runpod_job_id);
+    let runpod;
+    try {
+      runpod = await getRunpodJobStatus(current.mode, current.runpod_job_id);
+    } catch (error) {
+      const parsed = parsePollError(error);
+
+      if (isTerminalRunpodPollError(parsed)) {
+        const updated = await updateJobStatus({
+          jobId: current.id,
+          status: "FAILED",
+          progressPercent: null,
+          delayTimeMs: current.delay_time_ms,
+          executionTimeMs: current.execution_time_ms,
+          errorReason: parsed.message,
+          runpodRaw: parsed.raw,
+        });
+
+        if (current.status !== "FAILED" || current.error_reason !== parsed.message) {
+          await createJobEvent(
+            user.id,
+            current.id,
+            "FAILED",
+            `RunPod polling failed: ${parsed.message}`,
+            parsed.raw,
+          );
+        }
+
+        return NextResponse.json({
+          success: true,
+          job: mapJobRowToResponse(updated),
+        });
+      }
+
+      throw error;
+    }
 
     let updated = await updateJobStatus({
       jobId: current.id,
@@ -115,11 +204,11 @@ export async function POST(
       job: mapJobRowToResponse(updated),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Polling failed.";
+    const parsed = parsePollError(error);
     return NextResponse.json(
       {
         success: false,
-        message,
+        message: parsed.message,
       },
       { status: 500 },
     );

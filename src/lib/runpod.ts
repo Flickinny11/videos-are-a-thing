@@ -197,10 +197,20 @@ export const getRunpodJobStatus = async (
     cache: "no-store",
   });
 
-  const raw = (await response.json()) as Record<string, unknown>;
+  let raw: Record<string, unknown> = {};
+  try {
+    raw = (await response.json()) as Record<string, unknown>;
+  } catch {
+    raw = {};
+  }
 
   if (!response.ok) {
-    throw new Error(JSON.stringify(raw));
+    throw new Error(
+      JSON.stringify({
+        httpStatus: response.status,
+        ...raw,
+      }),
+    );
   }
 
   return {
