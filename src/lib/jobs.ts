@@ -192,6 +192,18 @@ export const saveUploadedInput = async (input: {
   };
 };
 
+export const createSignedInputUrlFromPath = async (path: string, expiresInSeconds = 60 * 30) => {
+  const signed = await supabaseService.storage
+    .from("inputs-private")
+    .createSignedUrl(path, expiresInSeconds);
+
+  if (signed.error || !signed.data?.signedUrl) {
+    throw new Error(signed.error?.message || "Could not create signed input URL.");
+  }
+
+  return signed.data.signedUrl;
+};
+
 export const persistRemoteMediaToStorage = async (input: {
   userId: string;
   jobId: string;
@@ -235,6 +247,25 @@ export const getUserLibrary = async (userId: string): Promise<LibraryItem[]> => 
   if (error) throw new Error(error.message);
 
   const rows = data || [];
+  const jobIds = Array.from(new Set(rows.map((row) => row.job_id)));
+  const modeByJobId = new Map<string, JobMode>();
+
+  if (jobIds.length) {
+    const jobs = await supabaseService
+      .from("generation_jobs")
+      .select("id,mode")
+      .eq("user_id", userId)
+      .in("id", jobIds)
+      .returns<Array<{ id: string; mode: JobMode }>>();
+
+    if (jobs.error) {
+      throw new Error(jobs.error.message);
+    }
+
+    (jobs.data || []).forEach((row) => {
+      modeByJobId.set(row.id, row.mode);
+    });
+  }
 
   const items = await Promise.all(
     rows.map(async (row) => {
@@ -248,6 +279,8 @@ export const getUserLibrary = async (userId: string): Promise<LibraryItem[]> => 
 
       return {
         id: row.id,
+        jobId: row.job_id,
+        mode: modeByJobId.get(row.job_id) || null,
         kind: row.kind,
         playUrl: signed.data.signedUrl,
         downloadUrl: signed.data.signedUrl,
@@ -260,4 +293,50 @@ export const getUserLibrary = async (userId: string): Promise<LibraryItem[]> => 
   );
 
   return items;
+};
+
+export const getUserMediaAsset = async (userId: string, mediaId: string) => {
+  const { data, error } = await supabaseService
+    .from("media_assets")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("id", mediaId)
+    .single<MediaRecord>();
+
+  if (error || !data) throw new Error("Media not found.");
+  return data;
+};
+
+export const deleteUserMediaAsset = async (userId: string, mediaId: string) => {
+  const media = await getUserMediaAsset(userId, mediaId);
+
+  const removeStorage = await supabaseService.storage
+    .from("media-library")
+    .remove([media.storage_path]);
+
+  if (removeStorage.error) {
+    throw new Error(removeStorage.error.message);
+  }
+
+  const clearOutputRef = await supabaseService
+    .from("generation_jobs")
+    .update({ output_media_id: null })
+    .eq("user_id", userId)
+    .eq("output_media_id", media.id);
+
+  if (clearOutputRef.error) {
+    throw new Error(clearOutputRef.error.message);
+  }
+
+  const removeRow = await supabaseService
+    .from("media_assets")
+    .delete()
+    .eq("user_id", userId)
+    .eq("id", media.id);
+
+  if (removeRow.error) {
+    throw new Error(removeRow.error.message);
+  }
+
+  return media;
 };

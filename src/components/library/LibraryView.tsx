@@ -1,6 +1,7 @@
 "use client";
 
 import gsap from "gsap";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { VFXSpan } from "react-vfx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -12,10 +13,13 @@ import type { LibraryItem } from "@/types/app";
 type FilterKind = "all" | "video" | "image";
 
 export function LibraryView() {
+  const router = useRouter();
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [filter, setFilter] = useState<FilterKind>("all");
+  const [busyId, setBusyId] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
 
   const fetchLibrary = useCallback(async () => {
@@ -48,6 +52,79 @@ export function LibraryView() {
     if (filter === "all") return items;
     return items.filter((item) => item.kind === filter);
   }, [items, filter]);
+
+  const shareItem = async (item: LibraryItem) => {
+    setNotice("");
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "RunPod Media Studio",
+          text: item.prompt,
+          url: item.downloadUrl,
+        });
+        setNotice("Share sheet opened.");
+        return;
+      }
+
+      await navigator.clipboard.writeText(item.downloadUrl);
+      setNotice("Share URL copied to clipboard.");
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Share failed.");
+    }
+  };
+
+  const retryFromItem = async (item: LibraryItem) => {
+    if (!item.jobId) {
+      setNotice("Missing source job id for retry.");
+      return;
+    }
+
+    setBusyId(item.id);
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/jobs/${item.jobId}/retry`, {
+        method: "POST",
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "Retry failed.");
+      }
+
+      setNotice(`Retry submitted: ${data.job.id}`);
+      router.push("/queue");
+      router.refresh();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Retry failed.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const deleteItem = async (item: LibraryItem) => {
+    const confirmed = window.confirm("Delete this media item from your library?");
+    if (!confirmed) return;
+
+    setBusyId(item.id);
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/library/${item.id}`, {
+        method: "DELETE",
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "Delete failed.");
+      }
+
+      setItems((current) => current.filter((entry) => entry.id !== item.id));
+      setNotice("Media deleted.");
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Delete failed.");
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   useEffect(() => {
     const scope = gridRef.current;
@@ -136,6 +213,7 @@ export function LibraryView() {
       <article className="rounded-[2.1rem] border border-cyan-100/20 bg-slate-950/55 p-5 backdrop-blur-2xl md:p-7">
         {loading ? <p className="text-sm text-cyan-100/75">Loading library...</p> : null}
         {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+        {notice ? <p className="text-sm text-cyan-200">{notice}</p> : null}
         {!loading && !filteredItems.length ? <p className="text-sm text-cyan-100/75">No media items found.</p> : null}
 
         <div ref={gridRef} className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -165,14 +243,42 @@ export function LibraryView() {
                 <span className="rounded-full border border-cyan-100/30 bg-cyan-300/10 px-2 py-1 text-[11px] uppercase tracking-[0.1em] text-cyan-100/80">
                   {item.kind}
                 </span>
-                <a
-                  href={item.downloadUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-xl border border-cyan-100/45 bg-cyan-100/10 px-3 py-2 text-xs uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-100/20"
+                <div className="flex items-center gap-2">
+                  <a
+                    href={item.downloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl border border-cyan-100/45 bg-cyan-100/10 px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-100/20"
+                  >
+                    Download
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => void shareItem(item)}
+                    className="rounded-xl border border-cyan-100/45 bg-cyan-100/10 px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-100/20"
+                  >
+                    Share
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={busyId === item.id}
+                  onClick={() => void retryFromItem(item)}
+                  className="rounded-xl border border-cyan-100/45 bg-slate-900/65 px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-cyan-100 transition hover:bg-slate-800/70 disabled:opacity-60"
                 >
-                  Download
-                </a>
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  disabled={busyId === item.id}
+                  onClick={() => void deleteItem(item)}
+                  className="rounded-xl border border-rose-200/45 bg-rose-300/10 px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-rose-200 transition hover:bg-rose-300/20 disabled:opacity-60"
+                >
+                  Delete
+                </button>
               </div>
             </article>
           ))}

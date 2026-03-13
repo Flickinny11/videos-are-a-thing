@@ -63,6 +63,8 @@ export interface JobResponse {
 
 export interface LibraryItem {
   id: string;
+  jobId: string;
+  mode: JobMode | null;
   kind: MediaKind;
   playUrl: string;
   downloadUrl: string;
