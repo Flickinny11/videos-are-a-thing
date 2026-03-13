@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 
-import { MediaStudioClient } from "@/components/studio/MediaStudioClient";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function HomePage() {
@@ -13,5 +12,5 @@ export default async function HomePage() {
     redirect("/login");
   }
 
-  return <MediaStudioClient userEmail={user.email || "Unknown"} />;
+  redirect("/studio");
 }
