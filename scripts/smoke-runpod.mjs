@@ -14,34 +14,52 @@ const jobs = [
   {
     name: "wan-2-6-t2v",
     endpoint: "wan-2-6-t2v",
-    payload: { prompt: "cinematic aerial drone shot over ocean at sunset", duration: 5, enable_safety_checker: false },
+    payload: {
+      input: {
+        prompt: "cinematic aerial drone shot over ocean at sunset",
+        duration: 5,
+        size: "1280*720",
+        seed: -1,
+        enable_prompt_expansion: false,
+      },
+    },
   },
   {
     name: "wan-2-6-i2v",
     endpoint: "wan-2-6-i2v",
     payload: {
-      prompt: "camera slowly pushes in with natural motion",
-      image_url: imageUrl,
-      duration: 5,
-      enable_safety_checker: false,
+      input: {
+        prompt: "camera slowly pushes in with natural motion",
+        image: imageUrl,
+        duration: 5,
+        size: "1280*720",
+        seed: -1,
+        enable_prompt_expansion: false,
+      },
     },
   },
   {
     name: "flux-kontext-dev",
     endpoint: "black-forest-labs-flux-1-kontext-dev",
     payload: {
-      prompt: "turn this image into a futuristic neon cityscape",
-      image_url: imageUrl,
-      enable_safety_checker: false,
+      input: {
+        prompt: "turn this image into a futuristic neon cityscape",
+        image: imageUrl,
+        guidance_scale: 2.5,
+        num_inference_steps: 30,
+        seed: -1,
+      },
     },
   },
   {
     name: "qwen-image-edit",
     endpoint: "qwen-image-edit",
     payload: {
-      prompt: "convert this image into watercolor style",
-      image_url: imageUrl,
-      enable_safety_checker: false,
+      input: {
+        prompt: "convert this image into watercolor style",
+        image: imageUrl,
+        seed: -1,
+      },
     },
   },
 ];

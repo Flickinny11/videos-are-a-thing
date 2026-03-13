@@ -86,51 +86,84 @@ const extractProgressPercent = (raw: Record<string, unknown>): number | null => 
   return null;
 };
 
-const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, unknown>> => {
-  const safety = { enable_safety_checker: false };
+const withInputWrapper = (payload: Record<string, unknown>) => ({
+  input: payload,
+});
 
+const withSafetyFallback = (payload: Record<string, unknown>) => [
+  withInputWrapper({
+    ...payload,
+    enable_safety_checker: false,
+  }),
+  withInputWrapper(payload),
+];
+
+const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, unknown>> => {
   switch (input.mode) {
-    case "video:t2v":
+    case "video:t2v": {
+      const duration = input.durationSeconds || 5;
+      const base = {
+        prompt: input.prompt,
+        duration,
+        size: "1280*720",
+        seed: -1,
+        enable_prompt_expansion: false,
+      };
+
       return [
-        { prompt: input.prompt, duration: input.durationSeconds, ...safety },
-        { prompt: input.prompt, video_length: input.durationSeconds, ...safety },
-        { prompt: input.prompt, seconds: input.durationSeconds, ...safety },
+        ...withSafetyFallback(base),
+        withInputWrapper({ ...base, video_length: duration }),
       ];
-    case "video:i2v":
+    }
+    case "video:i2v": {
+      const duration = input.durationSeconds || 5;
+      const image = input.inputImageUrl;
+      const base = {
+        prompt: input.prompt,
+        image,
+        duration,
+        size: "1280*720",
+        seed: -1,
+        enable_prompt_expansion: false,
+      };
+
       return [
-        {
-          prompt: input.prompt,
-          image_url: input.inputImageUrl,
-          duration: input.durationSeconds,
-          ...safety,
-        },
-        {
-          prompt: input.prompt,
-          image: input.inputImageUrl,
-          duration: input.durationSeconds,
-          ...safety,
-        },
-        {
-          prompt: input.prompt,
-          input_image: input.inputImageUrl,
-          duration: input.durationSeconds,
-          ...safety,
-        },
+        ...withSafetyFallback(base),
+        withInputWrapper({ ...base, image_url: image }),
+        withInputWrapper({ ...base, input_image: image }),
       ];
-    case "image:flux":
+    }
+    case "image:flux": {
+      const image = input.inputImageUrl;
+      const base = {
+        prompt: input.prompt,
+        image,
+        seed: -1,
+        guidance_scale: 2.5,
+        num_inference_steps: 30,
+      };
+
       return [
-        { prompt: input.prompt, image_url: input.inputImageUrl, ...safety },
-        { prompt: input.prompt, image: input.inputImageUrl, ...safety },
-        { prompt: input.prompt, input_image: input.inputImageUrl, ...safety },
+        ...withSafetyFallback(base),
+        withInputWrapper({ ...base, image_url: image }),
       ];
-    case "image:qwen":
+    }
+    case "image:qwen": {
+      const image = input.inputImageUrl;
+      const base = {
+        prompt: input.prompt,
+        image,
+        seed: -1,
+      };
+
       return [
-        { prompt: input.prompt, image_url: input.inputImageUrl, ...safety },
-        { instruction: input.prompt, image_url: input.inputImageUrl, ...safety },
-        { prompt: input.prompt, image: input.inputImageUrl, ...safety },
+        ...withSafetyFallback(base),
+        withInputWrapper({ ...base, image_url: image }),
+        withInputWrapper({ ...base, instruction: input.prompt }),
       ];
+    }
     default:
-      return [{ prompt: input.prompt, ...safety }];
+      return withSafetyFallback({ prompt: input.prompt });
   }
 };
 
