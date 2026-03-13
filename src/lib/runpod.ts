@@ -1,4 +1,4 @@
-import { env } from "@/lib/env";
+import { envServer } from "@/lib/env/server";
 import type { JobMode, JobStatus } from "@/types/app";
 
 const RUNPOD_BASE = "https://api.runpod.ai/v2";
@@ -36,7 +36,7 @@ export interface RunpodStatusResponse {
 
 const headers = {
   "Content-Type": "application/json",
-  Authorization: `Bearer ${env.runpodApiKey}`,
+  Authorization: `Bearer ${envServer.runpodApiKey}`,
 };
 
 const parseJobStatus = (value: unknown): JobStatus => {

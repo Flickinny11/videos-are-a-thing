@@ -4,7 +4,7 @@ const required = (name: string) => {
   return value;
 };
 
-export const env = {
+export const envServer = {
   supabaseUrl: required("NEXT_PUBLIC_SUPABASE_URL"),
   supabaseAnonKey: required("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
   supabaseSecretKey: required("SUPABASE_SECRET_KEY"),
@@ -12,5 +12,4 @@ export const env = {
   supabaseAccessToken: process.env.SUPABASE_ACCESS_TOKEN || "",
   supabaseProjectRef: required("SUPABASE_PROJECT_REF"),
   runpodApiKey: required("RUNPOD_API_KEY"),
-  appOrigin: process.env.NEXT_PUBLIC_APP_ORIGIN || "http://localhost:3000",
 };
