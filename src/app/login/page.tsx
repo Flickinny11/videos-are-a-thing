@@ -46,6 +46,7 @@ export default function LoginPage() {
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
+          autoComplete="email"
           className="mb-4 w-full rounded-xl border border-cyan-100/25 bg-slate-900/80 p-3 outline-none focus:ring-2 focus:ring-cyan-300/45"
           required
         />
@@ -55,6 +56,7 @@ export default function LoginPage() {
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
+          autoComplete="current-password"
           className="mb-4 w-full rounded-xl border border-cyan-100/25 bg-slate-900/80 p-3 outline-none focus:ring-2 focus:ring-cyan-300/45"
           required
         />
