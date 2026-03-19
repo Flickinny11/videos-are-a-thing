@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CurtainsLayer } from "@/components/effects/CurtainsLayer";
 import { InteractiveButton } from "@/components/effects/InteractiveButton";
 import { LenisProvider } from "@/components/effects/LenisProvider";
+import { downloadFile } from "@/lib/download";
 import { OglNebulaBackground } from "@/components/effects/OglNebulaBackground";
 import { PostFxHalo } from "@/components/effects/PostFxHalo";
 import { PhysicsIcons } from "@/components/effects/PhysicsIcons";
@@ -429,9 +430,7 @@ export function MediaStudioClient({ userEmail }: Props) {
                   <p className="line-clamp-2 text-sm text-slate-100">{item.prompt}</p>
                   <p className="mt-1 text-xs uppercase tracking-wide text-cyan-100/80">{item.model}</p>
                   <InteractiveButton
-                    onClick={() => {
-                      window.open(item.downloadUrl, "_blank", "noreferrer");
-                    }}
+                    onClick={() => downloadFile(item.downloadUrl)}
                     className="mt-3"
                   >
                     Download
