@@ -184,6 +184,42 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
   }
 };
 
+/**
+ * Structured error thrown by RunPod operations so callers can inspect
+ * the HTTP status and whether this is a billing/credit issue without
+ * needing to keyword-match a JSON blob.
+ */
+export class RunpodError extends Error {
+  httpStatus: number;
+  isBillingError: boolean;
+  runpodBody: Record<string, unknown>;
+
+  constructor(body: Record<string, unknown>, httpStatus: number) {
+    const errorField = typeof body.error === "string" ? body.error : "";
+    const messageField = typeof body.message === "string" ? body.message : "";
+    const detail = errorField || messageField || JSON.stringify(body);
+
+    super(detail);
+    this.name = "RunpodError";
+    this.httpStatus = httpStatus;
+    this.runpodBody = body;
+
+    // Detect billing/credit issues from HTTP status codes (401 = auth,
+    // 402 = payment required, 403 = forbidden which RunPod sometimes uses
+    // for billing) AND from the specific error text in the response body.
+    const lowerDetail = detail.toLowerCase();
+    this.isBillingError =
+      httpStatus === 402 ||
+      (httpStatus === 401 && lowerDetail.includes("credit")) ||
+      (httpStatus === 403 && lowerDetail.includes("credit")) ||
+      lowerDetail.includes("insufficient fund") ||
+      lowerDetail.includes("insufficient credit") ||
+      lowerDetail.includes("no credits") ||
+      lowerDetail.includes("billing limit") ||
+      lowerDetail.includes("out of credit");
+  }
+}
+
 const runRequest = async (
   endpoint: string,
   payload: Record<string, unknown>,
@@ -205,11 +241,31 @@ const runRequest = async (
   return { ok: response.ok, body, status: response.status };
 };
 
+/**
+ * Returns true when a failed response is a billing/auth issue that
+ * retrying with a different payload shape will never fix.
+ */
+const isBillingOrAuthFailure = (status: number, body: Record<string, unknown>): boolean => {
+  if (status === 402) return true;
+  const errorText = (typeof body.error === "string" ? body.error : "").toLowerCase();
+  const messageText = (typeof body.message === "string" ? body.message : "").toLowerCase();
+  const combined = `${errorText} ${messageText}`;
+  return (
+    combined.includes("insufficient fund") ||
+    combined.includes("insufficient credit") ||
+    combined.includes("no credits") ||
+    combined.includes("billing limit") ||
+    combined.includes("out of credit") ||
+    ((status === 401 || status === 403) && combined.includes("credit"))
+  );
+};
+
 export const startRunpodJob = async (input: RunpodStartRequest): Promise<RunpodRunResponse> => {
   const endpoint = MODEL_ENDPOINT_BY_MODE[input.mode];
   const candidates = runCandidatePayloads(input);
 
   let lastError: Record<string, unknown> | null = null;
+  let lastStatus = 0;
 
   for (const payload of candidates) {
     const result = await runRequest(endpoint, payload);
@@ -222,15 +278,19 @@ export const startRunpodJob = async (input: RunpodStartRequest): Promise<RunpodR
       };
     }
 
-    lastError = {
-      ...result.body,
-      httpStatus: result.status,
-      attemptedPayload: payload,
-    };
+    lastError = result.body;
+    lastStatus = result.status;
+
+    // Billing/auth errors won't be fixed by trying a different payload
+    // shape, so bail out immediately instead of burning through candidates.
+    if (isBillingOrAuthFailure(result.status, result.body)) {
+      break;
+    }
   }
 
-  throw new Error(
-    JSON.stringify(lastError || { error: "RunPod request failed before receiving a response body." }),
+  throw new RunpodError(
+    lastError || { error: "RunPod request failed before receiving a response body." },
+    lastStatus,
   );
 };
 
