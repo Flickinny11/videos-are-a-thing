@@ -55,12 +55,16 @@ export async function POST(request: Request) {
     const videoMode = String(formData.get("videoMode") || "").trim();
     const imageModel = String(formData.get("imageModel") || "").trim();
     const durationRaw = Number(formData.get("duration") || 5);
+    const resolutionRaw = String(formData.get("resolution") || "720p").trim();
     const sourceFile = formData.get("sourceFile");
 
     if (!prompt) return fail("Prompt is required.");
     if (!["image", "video"].includes(mediaType)) return fail("mediaType must be image or video.");
 
     const duration = [5, 10, 15].includes(durationRaw) ? durationRaw : 5;
+    const resolution = (["720p", "1080p"] as const).includes(resolutionRaw as "720p" | "1080p")
+      ? (resolutionRaw as "720p" | "1080p")
+      : "720p";
 
     let mode: JobMode;
     if (mediaType === "video") {
@@ -89,6 +93,7 @@ export async function POST(request: Request) {
         mode,
         prompt,
         durationSeconds: mode.startsWith("video") ? duration : undefined,
+        resolution: mode.startsWith("video") ? resolution : undefined,
         inputImageUrl: inputSignedUrl,
       });
     } catch (error) {

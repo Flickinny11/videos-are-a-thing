@@ -14,6 +14,7 @@ export function StudioCreateView() {
   const [mediaType, setMediaType] = useState<"image" | "video">("video");
   const [videoMode, setVideoMode] = useState<"i2v" | "t2v">("t2v");
   const [duration, setDuration] = useState<5 | 10 | 15>(5);
+  const [resolution, setResolution] = useState<"720p" | "1080p">("720p");
   const [imageModel, setImageModel] = useState<"qwen" | "flux">("qwen");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -47,6 +48,7 @@ export function StudioCreateView() {
       body.set("mediaType", mediaType);
       body.set("videoMode", videoMode);
       body.set("duration", String(duration));
+      body.set("resolution", resolution);
       body.set("imageModel", imageModel);
       if (sourceFile) body.set("sourceFile", sourceFile);
 
@@ -144,6 +146,23 @@ export function StudioCreateView() {
                     onClick={() => setDuration(seconds as 5 | 10 | 15)}
                   >
                     {seconds}s
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {(["720p", "1080p"] as const).map((res) => (
+                  <button
+                    key={res}
+                    type="button"
+                    className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition ${
+                      resolution === res
+                        ? "border-cyan-100/80 bg-cyan-100 text-slate-900"
+                        : "border-cyan-100/30 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/20"
+                    }`}
+                    onClick={() => setResolution(res)}
+                  >
+                    {res}
                   </button>
                 ))}
               </div>
