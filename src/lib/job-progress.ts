@@ -8,14 +8,16 @@ export const isActiveJob = (status: string) =>
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 export const getRealtimeProgressPercent = (job: JobResponse): number => {
-  if (typeof job.progressPercent === "number") {
-    return clamp(Math.round(job.progressPercent), 0, 100);
-  }
-
+  // Terminal states always 100%
   if (job.status === "COMPLETED") return 100;
   if (TERMINAL_FAILURE.has(job.status)) return 100;
 
-  // Timing-derived fallback when endpoint doesn't expose direct progress%.
+  // Real RunPod progress % from progress_update() – always preferred
+  if (typeof job.progressPercent === "number" && job.progressPercent > 0) {
+    return clamp(Math.round(job.progressPercent), 1, 99);
+  }
+
+  // Timing-derived fallback only when RunPod hasn't reported real progress
   if (job.status === "IN_QUEUE" || job.status === "RETRY" || job.status === "THROTTLED") {
     const queueMs = Math.max(0, job.delayTimeMs || 0);
     return clamp(8 + Math.round(queueMs / 820), 8, 38);
@@ -27,6 +29,12 @@ export const getRealtimeProgressPercent = (job: JobResponse): number => {
   }
 
   return 0;
+};
+
+export const getProgressSource = (job: JobResponse): "runpod" | "timing" | "terminal" => {
+  if (job.status === "COMPLETED" || TERMINAL_FAILURE.has(job.status)) return "terminal";
+  if (typeof job.progressPercent === "number" && job.progressPercent > 0) return "runpod";
+  return "timing";
 };
 
 export const getAdaptivePollMs = (jobs: JobResponse[], failureStreak: number): number => {

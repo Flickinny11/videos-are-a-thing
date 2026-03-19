@@ -200,7 +200,16 @@ export function StudioCreateView() {
               type="button"
               onClick={submit}
               disabled={isSubmitting}
-              className="rounded-2xl border border-cyan-50/70 bg-gradient-to-r from-cyan-100 to-cyan-300 px-6 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-900 shadow-[0_20px_55px_rgba(34,211,238,0.45)] transition hover:scale-[1.02] disabled:opacity-70"
+              className={`
+                rounded-2xl border border-cyan-50/70 bg-gradient-to-r from-cyan-100 to-cyan-300 px-6 py-3
+                text-xs font-semibold uppercase tracking-[0.16em] text-slate-900
+                shadow-[0_20px_55px_rgba(34,211,238,0.45)] transition-all duration-200
+                disabled:opacity-70 disabled:cursor-wait
+                ${isSubmitting
+                  ? "scale-[0.96] shadow-[0_12px_30px_rgba(34,211,238,0.6)] brightness-110"
+                  : "hover:scale-[1.02] hover:shadow-[0_24px_60px_rgba(34,211,238,0.5)] active:scale-[0.96]"
+                }
+              `}
             >
               {isSubmitting ? "Submitting..." : "Submit"}
             </button>
