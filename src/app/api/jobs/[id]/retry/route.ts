@@ -8,7 +8,7 @@ import {
   getUserJob,
   mapJobRowToResponse,
 } from "@/lib/jobs";
-import { runpodModelNameForMode, startRunpodJob } from "@/lib/runpod";
+import { RunpodError, runpodModelNameForMode, startRunpodJob } from "@/lib/runpod";
 
 const fail = (message: string, status = 400) =>
   NextResponse.json(
@@ -19,15 +19,25 @@ const fail = (message: string, status = 400) =>
     { status },
   );
 
-const normalizeRunpodError = (error: unknown) => {
-  const text = typeof error === "string" ? error : error instanceof Error ? error.message : "Unknown error";
-  const lowered = text.toLowerCase();
+const normalizeRunpodError = (error: unknown): { message: string; status: number } => {
+  if (error instanceof RunpodError) {
+    if (error.isBillingError) {
+      return {
+        message:
+          "RunPod billing error: insufficient credits or billing limit reached. " +
+          "If you just added credits, please wait a moment and try submitting again.",
+        status: 402,
+      };
+    }
 
-  if (lowered.includes("insufficient") || lowered.includes("credit")) {
-    return "RunPod request failed: no credits left or billing limit reached.";
+    return {
+      message: `RunPod request failed (HTTP ${error.httpStatus}): ${error.message}`,
+      status: 502,
+    };
   }
 
-  return `RunPod request failed: ${text}`;
+  const text = error instanceof Error ? error.message : "Unknown error";
+  return { message: `RunPod request failed: ${text}`, status: 502 };
 };
 
 export async function POST(
@@ -62,7 +72,8 @@ export async function POST(
         inputImageUrl,
       });
     } catch (error) {
-      return fail(normalizeRunpodError(error), 502);
+      const normalized = normalizeRunpodError(error);
+      return fail(normalized.message, normalized.status);
     }
 
     const model = runpodModelNameForMode(source.mode);
