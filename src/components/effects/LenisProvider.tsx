@@ -8,10 +8,12 @@ export function LenisProvider() {
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduceMotion) return;
 
+    const isMobile = window.matchMedia("(pointer: coarse)").matches;
+
     const lenis = new Lenis({
       lerp: 0.09,
       smoothWheel: true,
-      syncTouch: true,
+      syncTouch: !isMobile,
       wheelMultiplier: 0.86,
       touchMultiplier: 1.1,
     });
