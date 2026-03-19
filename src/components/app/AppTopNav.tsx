@@ -49,7 +49,7 @@ export function AppTopNav({ userEmail }: Props) {
         <form action="/auth/logout" method="post">
           <button
             type="submit"
-            className="rounded-2xl border border-cyan-100/45 bg-slate-900/65 px-5 py-3 text-xs uppercase tracking-[0.15em] text-cyan-50 transition hover:border-cyan-50 hover:bg-slate-800/70"
+            className="rounded-2xl border border-cyan-100/45 bg-slate-900/65 px-5 py-3 text-xs uppercase tracking-[0.15em] text-cyan-50 transition-all duration-200 hover:border-cyan-50 hover:bg-slate-800/70 active:scale-95 active:brightness-125"
           >
             Sign Out
           </button>
