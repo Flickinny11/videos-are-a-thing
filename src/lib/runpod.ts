@@ -68,12 +68,25 @@ const firstNumber = (value: unknown): number | null => {
 };
 
 const extractProgressPercent = (raw: Record<string, unknown>): number | null => {
+  const outputObj = raw.output as Record<string, unknown> | string | number | undefined;
+
+  // RunPod progress_update() writes directly to the `output` field as a
+  // string or number while the job is IN_PROGRESS.  Try that first.
+  const directOutput = typeof outputObj === "string" || typeof outputObj === "number" ? outputObj : undefined;
+
   const candidates = [
+    directOutput,
     raw.progress,
     raw.progressPercent,
     raw.progress_percentage,
-    (raw.output as Record<string, unknown> | undefined)?.progress,
-    (raw.output as Record<string, unknown> | undefined)?.progressPercent,
+    ...(outputObj && typeof outputObj === "object"
+      ? [
+          (outputObj as Record<string, unknown>).progress,
+          (outputObj as Record<string, unknown>).progressPercent,
+          (outputObj as Record<string, unknown>).progress_percentage,
+          (outputObj as Record<string, unknown>).percent,
+        ]
+      : []),
   ];
 
   for (const candidate of candidates) {

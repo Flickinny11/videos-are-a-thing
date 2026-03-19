@@ -6,8 +6,10 @@ import Image from "next/image";
 import { VFXSpan } from "react-vfx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { InteractiveButton } from "@/components/effects/InteractiveButton";
 import { OglLiquidRibbon } from "@/components/effects/OglLiquidRibbon";
 import { RapierFloatField } from "@/components/effects/RapierFloatField";
+import { WebGLRefreshButton } from "@/components/effects/WebGLRefreshButton";
 import type { LibraryItem } from "@/types/app";
 
 type FilterKind = "all" | "video" | "image";
@@ -184,28 +186,22 @@ export function LibraryView() {
               Completed media is re-hosted in your Supabase storage, streamed in-app, and downloadable on demand.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {(["all", "video", "image"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => setFilter(value)}
-                className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.14em] transition ${
+                className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.14em] transition-all duration-200 active:scale-95 ${
                   filter === value
-                    ? "border-cyan-100/75 bg-cyan-200/85 text-slate-900"
+                    ? "border-cyan-100/75 bg-cyan-200/85 text-slate-900 shadow-[0_0_12px_rgba(34,211,238,0.3)]"
                     : "border-cyan-100/35 bg-cyan-300/10 text-cyan-50 hover:bg-cyan-300/20"
                 }`}
               >
                 {value}
               </button>
             ))}
-            <button
-              type="button"
-              onClick={() => void fetchLibrary()}
-              className="rounded-2xl border border-cyan-100/40 bg-slate-900/55 px-4 py-2 text-xs uppercase tracking-[0.14em] text-cyan-100 transition hover:bg-slate-800/65"
-            >
-              Refresh
-            </button>
+            <WebGLRefreshButton onClick={() => fetchLibrary()} />
           </div>
         </div>
       </article>
@@ -248,37 +244,32 @@ export function LibraryView() {
                     href={item.downloadUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="rounded-xl border border-cyan-100/45 bg-cyan-100/10 px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-100/20"
+                    className="rounded-xl border border-cyan-100/45 bg-cyan-100/10 px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-cyan-50 transition-all duration-200 hover:bg-cyan-100/20 active:scale-95"
                   >
                     Download
                   </a>
-                  <button
-                    type="button"
-                    onClick={() => void shareItem(item)}
-                    className="rounded-xl border border-cyan-100/45 bg-cyan-100/10 px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-100/20"
-                  >
+                  <InteractiveButton onClick={() => shareItem(item)}>
                     Share
-                  </button>
+                  </InteractiveButton>
                 </div>
               </div>
 
               <div className="mt-2 flex items-center justify-end gap-2">
-                <button
-                  type="button"
+                <InteractiveButton
                   disabled={busyId === item.id}
-                  onClick={() => void retryFromItem(item)}
-                  className="rounded-xl border border-cyan-100/45 bg-slate-900/65 px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-cyan-100 transition hover:bg-slate-800/70 disabled:opacity-60"
+                  onClick={() => retryFromItem(item)}
+                  variant="ghost"
+                  className="bg-slate-900/65 hover:bg-slate-800/70"
                 >
                   Retry
-                </button>
-                <button
-                  type="button"
+                </InteractiveButton>
+                <InteractiveButton
                   disabled={busyId === item.id}
-                  onClick={() => void deleteItem(item)}
-                  className="rounded-xl border border-rose-200/45 bg-rose-300/10 px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-rose-200 transition hover:bg-rose-300/20 disabled:opacity-60"
+                  onClick={() => deleteItem(item)}
+                  variant="danger"
                 >
                   Delete
-                </button>
+                </InteractiveButton>
               </div>
             </article>
           ))}

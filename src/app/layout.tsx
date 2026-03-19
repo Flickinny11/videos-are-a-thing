@@ -1,19 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { Orbitron, Outfit } from "next/font/google";
 
 import "./globals.css";
-
-const orbitron = Orbitron({
-  subsets: ["latin"],
-  variable: "--font-orbitron",
-  weight: ["500", "700"],
-});
-
-const outfit = Outfit({
-  subsets: ["latin"],
-  variable: "--font-outfit",
-  weight: ["300", "400", "500", "600", "700"],
-});
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -33,7 +20,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${orbitron.variable} ${outfit.variable}`}>
+    <html lang="en">
       <body>{children}</body>
     </html>
   );

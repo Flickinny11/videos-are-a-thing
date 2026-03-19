@@ -5,8 +5,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { OglLiquidRibbon } from "@/components/effects/OglLiquidRibbon";
 import { PostFxHalo } from "@/components/effects/PostFxHalo";
+import { PremiumProgressBar } from "@/components/effects/PremiumProgressBar";
 import { RapierFloatField } from "@/components/effects/RapierFloatField";
-import { formatDurationMs, getAdaptivePollMs, getRealtimeProgressPercent, isActiveJob } from "@/lib/job-progress";
+import { WebGLRefreshButton } from "@/components/effects/WebGLRefreshButton";
+import { formatDurationMs, getAdaptivePollMs, getProgressSource, getRealtimeProgressPercent, isActiveJob } from "@/lib/job-progress";
 import type { JobResponse } from "@/types/app";
 
 const statusTone = (status: string) => {
@@ -16,10 +18,16 @@ const statusTone = (status: string) => {
   return "text-sky-100";
 };
 
-const progressTrackTone = (status: string) => {
-  if (status === "COMPLETED") return "from-emerald-300 to-emerald-500";
-  if (status === "FAILED" || status === "TIMED_OUT" || status === "CANCELLED") return "from-rose-300 to-rose-500";
-  return "from-cyan-300 via-blue-300 to-indigo-300";
+const progressBarStatus = (status: string): "active" | "completed" | "failed" => {
+  if (status === "COMPLETED") return "completed";
+  if (status === "FAILED" || status === "TIMED_OUT" || status === "CANCELLED") return "failed";
+  return "active";
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  runpod: "RUNPOD LIVE %",
+  timing: "ESTIMATED %",
+  terminal: "FINAL",
 };
 
 export function QueueView() {
@@ -135,13 +143,7 @@ export function QueueView() {
       <article className="rounded-[2.1rem] border border-cyan-100/20 bg-slate-950/55 p-5 backdrop-blur-2xl md:p-7">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-xl font-semibold">Queue Stream</h3>
-          <button
-            type="button"
-            onClick={() => void fetchJobs()}
-            className="rounded-xl border border-cyan-100/40 bg-cyan-300/10 px-3 py-2 text-xs uppercase tracking-[0.14em] text-cyan-50 transition hover:bg-cyan-300/20"
-          >
-            Refresh
-          </button>
+          <WebGLRefreshButton onClick={() => fetchJobs()} />
         </div>
 
         {loading ? <p className="text-sm text-cyan-100/70">Loading queue...</p> : null}
@@ -151,8 +153,7 @@ export function QueueView() {
         <div className="grid gap-4 lg:grid-cols-2">
           {jobs.map((job) => {
             const progress = getRealtimeProgressPercent(job);
-            const timingSource =
-              job.progressPercent !== null ? "runpod-progress%" : isActiveJob(job.status) ? "timing-derived%" : "terminal";
+            const source = getProgressSource(job);
 
             return (
               <article
@@ -168,15 +169,30 @@ export function QueueView() {
                 <div className="mt-4">
                   <div className="mb-1 flex items-center justify-between text-xs uppercase tracking-[0.12em] text-cyan-50/80">
                     <span>Progress</span>
-                    <span>{progress}%</span>
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={`inline-block h-1.5 w-1.5 rounded-full ${
+                          source === "runpod"
+                            ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
+                            : source === "timing"
+                              ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.8)]"
+                              : "bg-slate-400"
+                        }`}
+                      />
+                      {progress}%
+                    </span>
                   </div>
-                  <div className="h-3 rounded-full border border-cyan-100/25 bg-slate-950/60 p-[2px]">
-                    <div
-                      className={`h-full rounded-full bg-gradient-to-r transition-all duration-700 ${progressTrackTone(job.status)}`}
-                      style={{ width: `${Math.max(4, progress)}%` }}
-                    />
-                  </div>
-                  <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-cyan-100/65">{timingSource}</p>
+
+                  {/* Premium WebGL progress bar */}
+                  <PremiumProgressBar
+                    progress={progress}
+                    status={progressBarStatus(job.status)}
+                    className="h-4"
+                  />
+
+                  <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-cyan-100/65">
+                    {SOURCE_LABELS[source] || source}
+                  </p>
                 </div>
 
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-cyan-100/80">

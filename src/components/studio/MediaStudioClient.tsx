@@ -10,6 +10,8 @@ import { LenisProvider } from "@/components/effects/LenisProvider";
 import { OglNebulaBackground } from "@/components/effects/OglNebulaBackground";
 import { PostFxHalo } from "@/components/effects/PostFxHalo";
 import { PhysicsIcons } from "@/components/effects/PhysicsIcons";
+import { PremiumProgressBar } from "@/components/effects/PremiumProgressBar";
+import { getProgressSource, getRealtimeProgressPercent } from "@/lib/job-progress";
 import type { JobResponse, LibraryItem } from "@/types/app";
 
 interface Props {
@@ -192,7 +194,7 @@ export function MediaStudioClient({ userEmail }: Props) {
               Logged in as <span className="font-semibold">{userEmail}</span>
             </p>
             <form action="/auth/logout" method="post" className="mt-4">
-              <button className="rounded-xl border border-white/30 bg-white/10 px-4 py-2 text-sm hover:bg-white/20" type="submit">
+              <button className="rounded-xl border border-white/30 bg-white/10 px-4 py-2 text-sm transition-all duration-200 hover:bg-white/20 active:scale-95 active:brightness-125" type="submit">
                 Sign out
               </button>
             </form>
@@ -315,7 +317,15 @@ export function MediaStudioClient({ userEmail }: Props) {
                   type="button"
                   onClick={submit}
                   disabled={isSubmitting}
-                  className="rounded-2xl bg-gradient-to-r from-cyan-300 to-blue-300 px-6 py-3 font-semibold text-slate-900 shadow-[0_12px_30px_rgba(56,189,248,0.45)] disabled:opacity-70"
+                  className={`
+                    rounded-2xl bg-gradient-to-r from-cyan-300 to-blue-300 px-6 py-3 font-semibold text-slate-900
+                    shadow-[0_12px_30px_rgba(56,189,248,0.45)] transition-all duration-200
+                    disabled:opacity-70 disabled:cursor-wait
+                    ${isSubmitting
+                      ? "scale-[0.96] shadow-[0_8px_20px_rgba(56,189,248,0.6)] brightness-110"
+                      : "hover:scale-[1.02] hover:shadow-[0_16px_40px_rgba(56,189,248,0.55)] active:scale-[0.96]"
+                    }
+                  `}
                 >
                   {isSubmitting ? "Submitting..." : "Submit"}
                 </button>
@@ -335,21 +345,50 @@ export function MediaStudioClient({ userEmail }: Props) {
               </div>
               <div className="space-y-3">
                 {jobs.length === 0 ? <p className="text-sm text-slate-300/75">No jobs yet.</p> : null}
-                {jobs.map((job) => (
-                  <article key={job.id} className="rounded-2xl border border-cyan-200/15 bg-white/[0.04] p-3 text-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold uppercase tracking-wide text-cyan-100">{job.mode}</span>
-                      <span className={statusTone(job.status)}>{job.status}</span>
-                    </div>
-                    <p className="mt-2 line-clamp-2 text-slate-200/90">{job.prompt}</p>
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300/85">
-                      <span>Progress: {job.progressPercent !== null ? `${job.progressPercent}%` : "N/A"}</span>
-                      <span>Queue: {job.delayTimeMs !== null ? `${job.delayTimeMs}ms` : "-"}</span>
-                      <span>Exec: {job.executionTimeMs !== null ? `${job.executionTimeMs}ms` : "-"}</span>
-                      <span className="truncate">{job.errorReason ? `Reason: ${job.errorReason}` : "Reason: -"}</span>
-                    </div>
-                  </article>
-                ))}
+                {jobs.map((job) => {
+                  const progress = getRealtimeProgressPercent(job);
+                  const source = getProgressSource(job);
+                  const barStatus = job.status === "COMPLETED" ? "completed" as const
+                    : (job.status === "FAILED" || job.status === "TIMED_OUT" || job.status === "CANCELLED") ? "failed" as const
+                    : "active" as const;
+
+                  return (
+                    <article key={job.id} className="rounded-2xl border border-cyan-200/15 bg-white/[0.04] p-3 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold uppercase tracking-wide text-cyan-100">{job.mode}</span>
+                        <span className={statusTone(job.status)}>{job.status}</span>
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-slate-200/90">{job.prompt}</p>
+
+                      {/* Premium progress bar with real RunPod % */}
+                      <div className="mt-3">
+                        <div className="mb-1 flex items-center justify-between text-xs text-slate-300/85">
+                          <span className="flex items-center gap-1.5">
+                            <span
+                              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                                source === "runpod"
+                                  ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
+                                  : source === "timing"
+                                    ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.8)]"
+                                    : "bg-slate-400"
+                              }`}
+                            />
+                            {progress}%
+                          </span>
+                          <span className="text-[10px] uppercase tracking-wider opacity-70">
+                            {source === "runpod" ? "LIVE" : source === "timing" ? "EST" : "DONE"}
+                          </span>
+                        </div>
+                        <PremiumProgressBar progress={progress} status={barStatus} className="h-3" />
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-300/85">
+                        <span>Queue: {job.delayTimeMs !== null ? `${job.delayTimeMs}ms` : "-"}</span>
+                        <span>Exec: {job.executionTimeMs !== null ? `${job.executionTimeMs}ms` : "-"}</span>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             </div>
           </section>
