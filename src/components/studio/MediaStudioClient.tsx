@@ -6,6 +6,7 @@ import { VFXProvider, VFXSpan } from "react-vfx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CurtainsLayer } from "@/components/effects/CurtainsLayer";
+import { InteractiveButton } from "@/components/effects/InteractiveButton";
 import { LenisProvider } from "@/components/effects/LenisProvider";
 import { OglNebulaBackground } from "@/components/effects/OglNebulaBackground";
 import { PostFxHalo } from "@/components/effects/PostFxHalo";
@@ -211,24 +212,20 @@ export function MediaStudioClient({ userEmail }: Props) {
               />
 
               <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setMediaType("video")}
-                  className={`rounded-xl px-4 py-2 text-sm ${
-                    mediaType === "video" ? "bg-cyan-300 text-slate-900" : "border border-cyan-300/25 bg-cyan-400/10"
-                  }`}
-                >
-                  Video
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMediaType("image")}
-                  className={`rounded-xl px-4 py-2 text-sm ${
-                    mediaType === "image" ? "bg-cyan-300 text-slate-900" : "border border-cyan-300/25 bg-cyan-400/10"
-                  }`}
-                >
-                  Image
-                </button>
+                {(["video", "image"] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setMediaType(value)}
+                    className={`rounded-xl px-4 py-2 text-sm transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
+                      mediaType === value
+                        ? "bg-cyan-300 text-slate-900 shadow-[0_0_12px_rgba(34,211,238,0.3)]"
+                        : "border border-cyan-300/25 bg-cyan-400/10 hover:bg-cyan-400/20 hover:shadow-[0_0_8px_rgba(34,211,238,0.12)]"
+                    }`}
+                  >
+                    {value.charAt(0).toUpperCase() + value.slice(1)}
+                  </button>
+                ))}
               </div>
 
               {mediaType === "video" ? (
@@ -238,10 +235,10 @@ export function MediaStudioClient({ userEmail }: Props) {
                       <button
                         key={value}
                         type="button"
-                        className={`rounded-xl px-4 py-2 text-sm ${
+                        className={`rounded-xl px-4 py-2 text-sm transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
                           videoMode === value
-                            ? "bg-fuchsia-300 text-slate-900"
-                            : "border border-fuchsia-300/30 bg-fuchsia-400/10"
+                            ? "bg-fuchsia-300 text-slate-900 shadow-[0_0_12px_rgba(232,121,249,0.3)]"
+                            : "border border-fuchsia-300/30 bg-fuchsia-400/10 hover:bg-fuchsia-400/20 hover:shadow-[0_0_8px_rgba(232,121,249,0.12)]"
                         }`}
                         onClick={() => setVideoMode(value)}
                       >
@@ -255,10 +252,10 @@ export function MediaStudioClient({ userEmail }: Props) {
                       <button
                         key={seconds}
                         type="button"
-                        className={`rounded-xl px-4 py-2 text-sm ${
+                        className={`rounded-xl px-4 py-2 text-sm transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
                           duration === seconds
-                            ? "bg-amber-300 text-slate-900"
-                            : "border border-amber-300/30 bg-amber-300/10"
+                            ? "bg-amber-300 text-slate-900 shadow-[0_0_12px_rgba(252,211,77,0.3)]"
+                            : "border border-amber-300/30 bg-amber-300/10 hover:bg-amber-300/20 hover:shadow-[0_0_8px_rgba(252,211,77,0.12)]"
                         }`}
                         onClick={() => setDuration(seconds as 5 | 10 | 15)}
                       >
@@ -272,10 +269,10 @@ export function MediaStudioClient({ userEmail }: Props) {
                       <button
                         key={res}
                         type="button"
-                        className={`rounded-xl px-4 py-2 text-sm ${
+                        className={`rounded-xl px-4 py-2 text-sm transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
                           resolution === res
-                            ? "bg-amber-300 text-slate-900"
-                            : "border border-amber-300/30 bg-amber-300/10"
+                            ? "bg-amber-300 text-slate-900 shadow-[0_0_12px_rgba(252,211,77,0.3)]"
+                            : "border border-amber-300/30 bg-amber-300/10 hover:bg-amber-300/20 hover:shadow-[0_0_8px_rgba(252,211,77,0.12)]"
                         }`}
                         onClick={() => setResolution(res)}
                       >
@@ -404,7 +401,20 @@ export function MediaStudioClient({ userEmail }: Props) {
                 <article key={item.id} className="curtain-plane rounded-2xl border border-cyan-200/20 bg-slate-900/75 p-3">
                   <div className="mb-3 overflow-hidden rounded-xl border border-white/10">
                     {item.kind === "video" ? (
-                      <video src={item.playUrl} controls playsInline className="h-56 w-full object-cover" />
+                      <video
+                        src={item.playUrl}
+                        controls
+                        playsInline
+                        preload="none"
+                        className="h-56 w-full object-cover"
+                        onPlay={(e) => {
+                          // Pause all other videos in this section
+                          const current = e.currentTarget;
+                          document.querySelectorAll<HTMLVideoElement>(".studio-stagger video").forEach((v) => {
+                            if (v !== current) v.pause();
+                          });
+                        }}
+                      />
                     ) : (
                       <Image
                         src={item.playUrl}
@@ -418,14 +428,14 @@ export function MediaStudioClient({ userEmail }: Props) {
                   </div>
                   <p className="line-clamp-2 text-sm text-slate-100">{item.prompt}</p>
                   <p className="mt-1 text-xs uppercase tracking-wide text-cyan-100/80">{item.model}</p>
-                  <a
-                    href={item.downloadUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-3 inline-flex rounded-xl border border-cyan-200/35 px-3 py-1 text-xs hover:bg-cyan-100/10"
+                  <InteractiveButton
+                    onClick={() => {
+                      window.open(item.downloadUrl, "_blank", "noreferrer");
+                    }}
+                    className="mt-3"
                   >
                     Download
-                  </a>
+                  </InteractiveButton>
                 </article>
               ))}
             </div>
