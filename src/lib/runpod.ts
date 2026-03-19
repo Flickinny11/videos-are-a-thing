@@ -14,6 +14,7 @@ export interface RunpodStartRequest {
   mode: JobMode;
   prompt: string;
   durationSeconds?: number;
+  resolution?: "720p" | "1080p";
   inputImageUrl?: string;
 }
 
@@ -98,6 +99,9 @@ const withSafetyFallback = (payload: Record<string, unknown>) => [
   withInputWrapper(payload),
 ];
 
+const sizeForResolution = (resolution?: "720p" | "1080p"): string =>
+  resolution === "1080p" ? "1920*1080" : "1280*720";
+
 const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, unknown>> => {
   switch (input.mode) {
     case "video:t2v": {
@@ -105,7 +109,7 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
       const base = {
         prompt: input.prompt,
         duration,
-        size: "1280*720",
+        size: sizeForResolution(input.resolution),
         seed: -1,
         enable_prompt_expansion: false,
       };
@@ -122,7 +126,7 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
         prompt: input.prompt,
         image,
         duration,
-        size: "1280*720",
+        size: sizeForResolution(input.resolution),
         seed: -1,
         enable_prompt_expansion: false,
       };

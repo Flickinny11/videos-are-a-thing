@@ -30,6 +30,7 @@ export function MediaStudioClient({ userEmail }: Props) {
   const [mediaType, setMediaType] = useState<"image" | "video">("video");
   const [videoMode, setVideoMode] = useState<"i2v" | "t2v">("t2v");
   const [duration, setDuration] = useState<5 | 10 | 15>(5);
+  const [resolution, setResolution] = useState<"720p" | "1080p">("720p");
   const [imageModel, setImageModel] = useState<"qwen" | "flux">("qwen");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [jobs, setJobs] = useState<JobResponse[]>([]);
@@ -141,6 +142,7 @@ export function MediaStudioClient({ userEmail }: Props) {
       body.set("mediaType", mediaType);
       body.set("videoMode", videoMode);
       body.set("duration", String(duration));
+      body.set("resolution", resolution);
       body.set("imageModel", imageModel);
       if (sourceFile) {
         body.set("sourceFile", sourceFile);
@@ -259,6 +261,23 @@ export function MediaStudioClient({ userEmail }: Props) {
                         onClick={() => setDuration(seconds as 5 | 10 | 15)}
                       >
                         {seconds}s
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {(["720p", "1080p"] as const).map((res) => (
+                      <button
+                        key={res}
+                        type="button"
+                        className={`rounded-xl px-4 py-2 text-sm ${
+                          resolution === res
+                            ? "bg-amber-300 text-slate-900"
+                            : "border border-amber-300/30 bg-amber-300/10"
+                        }`}
+                        onClick={() => setResolution(res)}
+                      >
+                        {res}
                       </button>
                     ))}
                   </div>
