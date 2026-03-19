@@ -36,10 +36,10 @@ export function TransitionNavLink({ href, label, detail, icon }: Props) {
     <a
       href={href}
       onClick={onNavigate}
-      className={`group relative isolate overflow-hidden rounded-2xl border px-4 py-3 transition duration-300 ${
+      className={`group relative isolate overflow-hidden rounded-2xl border px-4 py-3 transition-all duration-300 active:scale-[0.96] active:brightness-110 ${
         active
           ? "border-cyan-100/70 bg-cyan-300/18 text-cyan-50 shadow-[0_12px_40px_rgba(34,211,238,0.35)]"
-          : "border-cyan-200/20 bg-slate-900/45 text-cyan-100/85 hover:border-cyan-100/40 hover:bg-cyan-300/12"
+          : "border-cyan-200/20 bg-slate-900/45 text-cyan-100/85 hover:border-cyan-100/40 hover:bg-cyan-300/12 hover:shadow-[0_8px_24px_rgba(34,211,238,0.15)]"
       }`}
       style={{ viewTransitionName: `nav-pill-${label.toLowerCase()}` }}
     >

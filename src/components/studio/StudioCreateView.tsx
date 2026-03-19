@@ -103,10 +103,10 @@ export function StudioCreateView() {
                 key={value}
                 type="button"
                 onClick={() => setMediaType(value)}
-                className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition ${
+                className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
                   mediaType === value
-                    ? "border-cyan-100/80 bg-cyan-200/80 text-slate-900"
-                    : "border-cyan-300/30 bg-cyan-400/10 text-cyan-50 hover:bg-cyan-400/20"
+                    ? "border-cyan-100/80 bg-cyan-200/80 text-slate-900 shadow-[0_0_12px_rgba(34,211,238,0.3)]"
+                    : "border-cyan-300/30 bg-cyan-400/10 text-cyan-50 hover:bg-cyan-400/20 hover:shadow-[0_0_8px_rgba(34,211,238,0.12)]"
                 }`}
               >
                 {value}
@@ -121,10 +121,10 @@ export function StudioCreateView() {
                   <button
                     key={value}
                     type="button"
-                    className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition ${
+                    className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
                       videoMode === value
-                        ? "border-cyan-100/80 bg-white/85 text-slate-900"
-                        : "border-cyan-100/30 bg-white/5 text-cyan-100 hover:bg-white/10"
+                        ? "border-cyan-100/80 bg-white/85 text-slate-900 shadow-[0_0_12px_rgba(255,255,255,0.2)]"
+                        : "border-cyan-100/30 bg-white/5 text-cyan-100 hover:bg-white/10 hover:shadow-[0_0_8px_rgba(255,255,255,0.08)]"
                     }`}
                     onClick={() => setVideoMode(value)}
                   >
@@ -138,10 +138,10 @@ export function StudioCreateView() {
                   <button
                     key={seconds}
                     type="button"
-                    className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition ${
+                    className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
                       duration === seconds
-                        ? "border-cyan-100/80 bg-cyan-100 text-slate-900"
-                        : "border-cyan-100/30 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/20"
+                        ? "border-cyan-100/80 bg-cyan-100 text-slate-900 shadow-[0_0_12px_rgba(34,211,238,0.3)]"
+                        : "border-cyan-100/30 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/20 hover:shadow-[0_0_8px_rgba(34,211,238,0.12)]"
                     }`}
                     onClick={() => setDuration(seconds as 5 | 10 | 15)}
                   >
@@ -155,10 +155,10 @@ export function StudioCreateView() {
                   <button
                     key={res}
                     type="button"
-                    className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition ${
+                    className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
                       resolution === res
-                        ? "border-cyan-100/80 bg-cyan-100 text-slate-900"
-                        : "border-cyan-100/30 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/20"
+                        ? "border-cyan-100/80 bg-cyan-100 text-slate-900 shadow-[0_0_12px_rgba(34,211,238,0.3)]"
+                        : "border-cyan-100/30 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/20 hover:shadow-[0_0_8px_rgba(34,211,238,0.12)]"
                     }`}
                     onClick={() => setResolution(res)}
                   >
@@ -215,7 +215,7 @@ export function StudioCreateView() {
             </button>
             <a
               href="/queue"
-              className="rounded-2xl border border-cyan-100/40 bg-slate-900/55 px-5 py-3 text-xs uppercase tracking-[0.16em] text-cyan-100 transition hover:bg-slate-800/65"
+              className="rounded-2xl border border-cyan-100/40 bg-slate-900/55 px-5 py-3 text-xs uppercase tracking-[0.16em] text-cyan-100 transition-all duration-200 hover:bg-slate-800/65 hover:shadow-[0_0_10px_rgba(34,211,238,0.15)] active:scale-[0.94] active:brightness-110"
             >
               Open Queue
             </a>
