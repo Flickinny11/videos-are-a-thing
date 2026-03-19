@@ -10,6 +10,7 @@ import { InteractiveButton } from "@/components/effects/InteractiveButton";
 import { OglLiquidRibbon } from "@/components/effects/OglLiquidRibbon";
 import { RapierFloatField } from "@/components/effects/RapierFloatField";
 import { WebGLRefreshButton } from "@/components/effects/WebGLRefreshButton";
+import { downloadFile } from "@/lib/download";
 import type { LibraryItem } from "@/types/app";
 
 type FilterKind = "all" | "video" | "image";
@@ -307,9 +308,7 @@ export function LibraryView() {
                 </span>
                 <div className="flex items-center gap-2">
                   <InteractiveButton
-                    onClick={() => {
-                      window.open(item.downloadUrl, "_blank", "noreferrer");
-                    }}
+                    onClick={() => downloadFile(item.downloadUrl)}
                   >
                     Download
                   </InteractiveButton>
