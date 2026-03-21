@@ -1,7 +1,6 @@
 "use client";
 
-import { VFXSpan } from "react-vfx";
-
+import { EffectsErrorBoundary } from "@/components/app/EffectsErrorBoundary";
 import { PhysicsIcons } from "@/components/effects/PhysicsIcons";
 import { OglLiquidRibbon } from "@/components/effects/OglLiquidRibbon";
 import { RapierFloatField } from "@/components/effects/RapierFloatField";
@@ -30,9 +29,15 @@ const Icon = ({ path }: { path: string }) => (
 export function AppTopNav({ userEmail }: Props) {
   return (
     <header className="relative mb-8 overflow-hidden rounded-[2.4rem] border border-cyan-100/20 bg-slate-950/45 p-5 backdrop-blur-2xl">
-      <OglLiquidRibbon className="pointer-events-none absolute inset-0 opacity-70" />
-      <RapierFloatField className="pointer-events-none absolute inset-0 opacity-45" count={10} />
-      <PhysicsIcons />
+      <EffectsErrorBoundary>
+        <OglLiquidRibbon className="pointer-events-none absolute inset-0 opacity-70" />
+      </EffectsErrorBoundary>
+      <EffectsErrorBoundary>
+        <RapierFloatField className="pointer-events-none absolute inset-0 opacity-45" count={10} />
+      </EffectsErrorBoundary>
+      <EffectsErrorBoundary>
+        <PhysicsIcons />
+      </EffectsErrorBoundary>
 
       <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -41,7 +46,7 @@ export function AppTopNav({ userEmail }: Props) {
             RUNPOD ORBIT DECK
           </div>
           <h1 className="mt-2 text-2xl font-semibold leading-tight md:text-4xl">
-            <VFXSpan shader="rgbShift">Studio Navigation Reactor</VFXSpan>
+            Studio Navigation Reactor
           </h1>
           <p className="mt-2 text-xs uppercase tracking-[0.15em] text-cyan-100/85">{userEmail}</p>
         </div>

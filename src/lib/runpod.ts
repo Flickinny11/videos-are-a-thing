@@ -13,6 +13,7 @@ const MODEL_ENDPOINT_BY_MODE: Record<JobMode, string> = {
 export interface RunpodStartRequest {
   mode: JobMode;
   prompt: string;
+  negativePrompt?: string;
   durationSeconds?: number;
   resolution?: "720p" | "1080p";
   inputImageUrl?: string;
@@ -115,12 +116,18 @@ const withSafetyFallback = (payload: Record<string, unknown>) => [
 const sizeForResolution = (resolution?: "720p" | "1080p"): string =>
   resolution === "1080p" ? "1920*1080" : "1280*720";
 
+const maybeNegativePrompt = (negativePrompt?: string): Record<string, unknown> =>
+  negativePrompt ? { negative_prompt: negativePrompt } : {};
+
 const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, unknown>> => {
+  const neg = maybeNegativePrompt(input.negativePrompt);
+
   switch (input.mode) {
     case "video:t2v": {
       const duration = input.durationSeconds || 5;
       const base = {
         prompt: input.prompt,
+        ...neg,
         duration,
         size: sizeForResolution(input.resolution),
         seed: -1,
@@ -137,6 +144,7 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
       const image = input.inputImageUrl;
       const base = {
         prompt: input.prompt,
+        ...neg,
         image,
         duration,
         size: sizeForResolution(input.resolution),
@@ -154,6 +162,7 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
       const image = input.inputImageUrl;
       const base = {
         prompt: input.prompt,
+        ...neg,
         image,
         seed: -1,
         guidance_scale: 2.5,
@@ -169,6 +178,7 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
       const image = input.inputImageUrl;
       const base = {
         prompt: input.prompt,
+        ...neg,
         image,
         seed: -1,
       };
@@ -180,7 +190,7 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
       ];
     }
     default:
-      return withSafetyFallback({ prompt: input.prompt });
+      return withSafetyFallback({ prompt: input.prompt, ...neg });
   }
 };
 

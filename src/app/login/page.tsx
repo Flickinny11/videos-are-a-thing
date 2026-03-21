@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
+import { EffectsErrorBoundary } from "@/components/app/EffectsErrorBoundary";
 import { OglNebulaBackground } from "@/components/effects/OglNebulaBackground";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -33,7 +34,9 @@ export default function LoginPage() {
 
   return (
     <main className="relative flex min-h-screen items-center justify-center px-4">
-      <OglNebulaBackground />
+      <EffectsErrorBoundary>
+        <OglNebulaBackground />
+      </EffectsErrorBoundary>
       <form
         onSubmit={onSubmit}
         className="w-full max-w-md rounded-3xl border border-cyan-200/20 bg-slate-950/60 p-6 text-slate-100 backdrop-blur-2xl"
