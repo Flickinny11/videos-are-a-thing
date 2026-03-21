@@ -1,14 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { EffectsErrorBoundary } from "@/components/app/EffectsErrorBoundary";
 import { OglLiquidRibbon } from "@/components/effects/OglLiquidRibbon";
-import { PostFxHalo } from "@/components/effects/PostFxHalo";
 import { PremiumProgressBar } from "@/components/effects/PremiumProgressBar";
 import { RapierFloatField } from "@/components/effects/RapierFloatField";
-import { WebGLRefreshButton } from "@/components/effects/WebGLRefreshButton";
-import { formatDurationMs, getAdaptivePollMs, getProgressSource, getRealtimeProgressPercent, isActiveJob } from "@/lib/job-progress";
+import { formatDurationMs, getRealtimeProgressPercent, isActiveJob } from "@/lib/job-progress";
 import type { JobResponse } from "@/types/app";
 
 const statusTone = (status: string) => {
@@ -24,40 +22,37 @@ const progressBarStatus = (status: string): "active" | "completed" | "failed" =>
   return "active";
 };
 
-const SOURCE_LABELS: Record<string, string> = {
-  runpod: "RUNPOD LIVE %",
-  timing: "ESTIMATED %",
-  terminal: "FINAL",
-};
-
 export function QueueView() {
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [failureStreak, setFailureStreak] = useState(0);
-  const [lastPolledAt, setLastPolledAt] = useState<number | null>(null);
+  const pollTimerRef = useRef<number>(0);
+  const mountedRef = useRef(true);
 
   const activeJobs = useMemo(() => jobs.filter((job) => isActiveJob(job.status)), [jobs]);
-  const nextPollMs = useMemo(() => getAdaptivePollMs(jobs, failureStreak), [jobs, failureStreak]);
+  const hasActive = activeJobs.length > 0;
 
-  const fetchJobs = useCallback(async (suppressError = false) => {
+  const fetchJobs = useCallback(async () => {
     try {
       const response = await fetch("/api/jobs", { cache: "no-store" });
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.message || "Failed to load queue");
-      setJobs(data.jobs || []);
-      if (!suppressError) setError("");
+      if (mountedRef.current) {
+        setJobs(data.jobs || []);
+        setError("");
+      }
     } catch (err) {
-      if (!suppressError) {
+      if (mountedRef.current) {
         setError(err instanceof Error ? err.message : "Failed to load queue");
       }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, []);
 
+  // Poll active jobs for real RunPod progress, then merge updates
   const pollActiveJobs = useCallback(async () => {
-    if (!activeJobs.length) return;
+    if (!activeJobs.length || !mountedRef.current) return;
 
     const settled = await Promise.allSettled(
       activeJobs.map(async (job) => {
@@ -70,43 +65,57 @@ export function QueueView() {
       }),
     );
 
+    if (!mountedRef.current) return;
+
     const successes = settled
       .filter((item): item is PromiseFulfilledResult<JobResponse> => item.status === "fulfilled")
       .map((item) => item.value);
-    const failures = settled.length - successes.length;
 
     if (successes.length) {
       const patch = new Map(successes.map((job) => [job.id, job]));
       setJobs((current) => current.map((job) => patch.get(job.id) || job));
-      setLastPolledAt(Date.now());
     }
 
-    if (failures) {
-      setFailureStreak((value) => Math.min(value + 1, 10));
-      setError("Some queue polls failed. Polling cadence is backing off automatically.");
-      await fetchJobs(true);
-      return;
-    }
-
-    setFailureStreak(0);
-    setError("");
-    if (activeJobs.length > 4) {
-      await fetchJobs(true);
+    // If any jobs just completed, do a full refresh to pick up new library items
+    const justCompleted = successes.some(
+      (s) => s.status === "COMPLETED" && activeJobs.find((a) => a.id === s.id)?.status !== "COMPLETED",
+    );
+    if (justCompleted) {
+      await fetchJobs();
     }
   }, [activeJobs, fetchJobs]);
 
+  // Initial load
   useEffect(() => {
+    mountedRef.current = true;
     void fetchJobs();
+    return () => { mountedRef.current = false; };
   }, [fetchJobs]);
 
+  // Auto-poll: 3s when jobs are in-progress, 6s when queued, 15s when idle.
+  // No manual refresh needed.
   useEffect(() => {
-    if (!activeJobs.length) return;
-    const timer = window.setTimeout(() => {
-      void pollActiveJobs();
-    }, nextPollMs);
+    const getPollInterval = () => {
+      if (!activeJobs.length) return 15000; // Slow poll when idle (picks up new jobs)
+      const hasInProgress = activeJobs.some((j) => j.status === "IN_PROGRESS");
+      return hasInProgress ? 3000 : 6000;
+    };
 
-    return () => window.clearTimeout(timer);
-  }, [activeJobs.length, pollActiveJobs, nextPollMs]);
+    const tick = async () => {
+      if (!mountedRef.current) return;
+      if (activeJobs.length > 0) {
+        await pollActiveJobs();
+      } else {
+        await fetchJobs();
+      }
+      if (mountedRef.current) {
+        pollTimerRef.current = window.setTimeout(tick, getPollInterval());
+      }
+    };
+
+    pollTimerRef.current = window.setTimeout(tick, getPollInterval());
+    return () => window.clearTimeout(pollTimerRef.current);
+  }, [activeJobs, pollActiveJobs, fetchJobs]);
 
   return (
     <section className="space-y-6">
@@ -117,40 +126,24 @@ export function QueueView() {
         <EffectsErrorBoundary>
           <RapierFloatField className="pointer-events-none absolute inset-0 opacity-45" count={12} />
         </EffectsErrorBoundary>
-        <div className="relative z-10 grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
-          <div>
-            <h2 className="text-2xl font-semibold md:text-4xl">
-              Realtime Queue Reactor with Adaptive Polling
-            </h2>
-            <p className="mt-2 max-w-2xl text-sm text-cyan-100/80">
-              Polling cadence is adaptive to job state and failure streak to prevent over-polling while keeping status
-              updates near realtime.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2 text-xs uppercase tracking-[0.15em] text-cyan-100/75">
-              <span className="rounded-full border border-cyan-100/35 bg-cyan-200/10 px-3 py-1">
-                Active Jobs: {activeJobs.length}
-              </span>
-              <span className="rounded-full border border-cyan-100/35 bg-cyan-200/10 px-3 py-1">
-                Next Poll: {(nextPollMs / 1000).toFixed(1)}s
-              </span>
-              <span className="rounded-full border border-cyan-100/35 bg-cyan-200/10 px-3 py-1">
-                Last Poll: {lastPolledAt ? new Date(lastPolledAt).toLocaleTimeString() : "-"}
-              </span>
+        <div className="relative z-10">
+          <h2 className="text-2xl font-semibold md:text-4xl">
+            Generation Queue
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm text-cyan-100/80">
+            Jobs are polled automatically. Progress updates come directly from RunPod in real time.
+          </p>
+          {hasActive ? (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-cyan-100/35 bg-cyan-200/10 px-3 py-1 text-[11px] uppercase tracking-[0.15em] text-cyan-100/75">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
+              {activeJobs.length} active {activeJobs.length === 1 ? "job" : "jobs"} — polling every {activeJobs.some((j) => j.status === "IN_PROGRESS") ? "3" : "6"}s
             </div>
-          </div>
-          <div className="rounded-3xl border border-cyan-100/20 bg-slate-900/45 p-3">
-            <EffectsErrorBoundary>
-              <PostFxHalo />
-            </EffectsErrorBoundary>
-          </div>
+          ) : null}
         </div>
       </article>
 
       <article className="rounded-[2.1rem] border border-cyan-100/20 bg-slate-950/55 p-5 backdrop-blur-2xl md:p-7">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-xl font-semibold">Queue Stream</h3>
-          <WebGLRefreshButton onClick={() => fetchJobs()} />
-        </div>
+        <h3 className="mb-4 text-xl font-semibold">Jobs</h3>
 
         {loading ? <p className="text-sm text-cyan-100/70">Loading queue...</p> : null}
         {!loading && jobs.length === 0 ? <p className="text-sm text-cyan-100/70">No jobs yet.</p> : null}
@@ -159,7 +152,6 @@ export function QueueView() {
         <div className="grid gap-4 lg:grid-cols-2">
           {jobs.map((job) => {
             const progress = getRealtimeProgressPercent(job);
-            const source = getProgressSource(job);
 
             return (
               <article
@@ -175,38 +167,23 @@ export function QueueView() {
                 <div className="mt-4">
                   <div className="mb-1 flex items-center justify-between text-xs uppercase tracking-[0.12em] text-cyan-50/80">
                     <span>Progress</span>
-                    <span className="flex items-center gap-2">
-                      <span
-                        className={`inline-block h-1.5 w-1.5 rounded-full ${
-                          source === "runpod"
-                            ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
-                            : source === "timing"
-                              ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.8)]"
-                              : "bg-slate-400"
-                        }`}
-                      />
-                      {progress}%
-                    </span>
+                    <span>{progress}%</span>
                   </div>
 
-                  {/* Premium WebGL progress bar */}
                   <PremiumProgressBar
                     progress={progress}
                     status={progressBarStatus(job.status)}
                     className="h-4"
                   />
-
-                  <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-cyan-100/65">
-                    {SOURCE_LABELS[source] || source}
-                  </p>
                 </div>
 
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-cyan-100/80">
                   <span>Queue: {formatDurationMs(job.delayTimeMs)}</span>
                   <span>Exec: {formatDurationMs(job.executionTimeMs)}</span>
-                  <span className="truncate">RunPod: {job.runpodJobId}</span>
-                  <span className="truncate">{job.errorReason ? `Reason: ${job.errorReason}` : "Reason: -"}</span>
                 </div>
+                {job.errorReason ? (
+                  <p className="mt-2 text-xs text-rose-300/90 truncate">{job.errorReason}</p>
+                ) : null}
               </article>
             );
           })}
