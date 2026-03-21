@@ -1,8 +1,8 @@
 "use client";
 
-import { VFXSpan } from "react-vfx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { EffectsErrorBoundary } from "@/components/app/EffectsErrorBoundary";
 import { OglLiquidRibbon } from "@/components/effects/OglLiquidRibbon";
 import { PostFxHalo } from "@/components/effects/PostFxHalo";
 import { PremiumProgressBar } from "@/components/effects/PremiumProgressBar";
@@ -111,12 +111,16 @@ export function QueueView() {
   return (
     <section className="space-y-6">
       <article className="relative isolate overflow-hidden rounded-[2.1rem] border border-cyan-100/20 bg-slate-950/55 p-5 backdrop-blur-2xl md:p-7">
-        <OglLiquidRibbon className="pointer-events-none absolute inset-0 opacity-70" />
-        <RapierFloatField className="pointer-events-none absolute inset-0 opacity-45" count={12} />
+        <EffectsErrorBoundary>
+          <OglLiquidRibbon className="pointer-events-none absolute inset-0 opacity-70" />
+        </EffectsErrorBoundary>
+        <EffectsErrorBoundary>
+          <RapierFloatField className="pointer-events-none absolute inset-0 opacity-45" count={12} />
+        </EffectsErrorBoundary>
         <div className="relative z-10 grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
           <div>
             <h2 className="text-2xl font-semibold md:text-4xl">
-              <VFXSpan shader="rgbShift">Realtime Queue Reactor with Adaptive Polling</VFXSpan>
+              Realtime Queue Reactor with Adaptive Polling
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-cyan-100/80">
               Polling cadence is adaptive to job state and failure streak to prevent over-polling while keeping status
@@ -135,7 +139,9 @@ export function QueueView() {
             </div>
           </div>
           <div className="rounded-3xl border border-cyan-100/20 bg-slate-900/45 p-3">
-            <PostFxHalo />
+            <EffectsErrorBoundary>
+              <PostFxHalo />
+            </EffectsErrorBoundary>
           </div>
         </div>
       </article>

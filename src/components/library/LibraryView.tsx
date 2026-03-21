@@ -3,9 +3,9 @@
 import gsap from "gsap";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { VFXSpan } from "react-vfx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { EffectsErrorBoundary } from "@/components/app/EffectsErrorBoundary";
 import { InteractiveButton } from "@/components/effects/InteractiveButton";
 import { OglLiquidRibbon } from "@/components/effects/OglLiquidRibbon";
 import { RapierFloatField } from "@/components/effects/RapierFloatField";
@@ -242,12 +242,16 @@ export function LibraryView() {
   return (
     <section className="space-y-6">
       <article className="relative isolate overflow-hidden rounded-[2.1rem] border border-cyan-100/20 bg-slate-950/55 p-5 backdrop-blur-2xl md:p-7">
-        <OglLiquidRibbon className="pointer-events-none absolute inset-0 opacity-75" />
-        <RapierFloatField className="pointer-events-none absolute inset-0 opacity-35" count={10} />
+        <EffectsErrorBoundary>
+          <OglLiquidRibbon className="pointer-events-none absolute inset-0 opacity-75" />
+        </EffectsErrorBoundary>
+        <EffectsErrorBoundary>
+          <RapierFloatField className="pointer-events-none absolute inset-0 opacity-35" count={10} />
+        </EffectsErrorBoundary>
         <div className="relative z-10 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h2 className="text-2xl font-semibold md:text-4xl">
-              <VFXSpan shader="rgbShift">Media Vault and Playback Gallery</VFXSpan>
+              Media Vault and Playback Gallery
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-cyan-100/80">
               Completed media is re-hosted in your Supabase storage, streamed in-app, and downloadable on demand.

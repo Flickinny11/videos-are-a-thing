@@ -61,6 +61,7 @@ export async function POST(request: Request) {
     const formData = await request.formData();
 
     const prompt = String(formData.get("prompt") || "").trim();
+    const negativePrompt = String(formData.get("negativePrompt") || "").trim() || undefined;
     const mediaType = String(formData.get("mediaType") || "").trim();
     const videoMode = String(formData.get("videoMode") || "").trim();
     const imageModel = String(formData.get("imageModel") || "").trim();
@@ -102,6 +103,7 @@ export async function POST(request: Request) {
       runpodResult = await startRunpodJob({
         mode,
         prompt,
+        negativePrompt,
         durationSeconds: mode.startsWith("video") ? duration : undefined,
         resolution: mode.startsWith("video") ? resolution : undefined,
         inputImageUrl: inputSignedUrl,

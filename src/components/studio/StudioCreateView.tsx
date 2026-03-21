@@ -1,9 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { VFXSpan } from "react-vfx";
 import { useMemo, useState } from "react";
 
+import { EffectsErrorBoundary } from "@/components/app/EffectsErrorBoundary";
 import { OglLiquidRibbon } from "@/components/effects/OglLiquidRibbon";
 import { PostFxHalo } from "@/components/effects/PostFxHalo";
 import { RapierFloatField } from "@/components/effects/RapierFloatField";
@@ -11,6 +11,7 @@ import { RapierFloatField } from "@/components/effects/RapierFloatField";
 export function StudioCreateView() {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
+  const [negativePrompt, setNegativePrompt] = useState("");
   const [mediaType, setMediaType] = useState<"image" | "video">("video");
   const [videoMode, setVideoMode] = useState<"i2v" | "t2v">("t2v");
   const [duration, setDuration] = useState<5 | 10 | 15>(5);
@@ -45,6 +46,7 @@ export function StudioCreateView() {
     try {
       const body = new FormData();
       body.set("prompt", prompt.trim());
+      if (negativePrompt.trim()) body.set("negativePrompt", negativePrompt.trim());
       body.set("mediaType", mediaType);
       body.set("videoMode", videoMode);
       body.set("duration", String(duration));
@@ -64,6 +66,7 @@ export function StudioCreateView() {
 
       setFlash("success");
       setPrompt("");
+      setNegativePrompt("");
       setSourceFile(null);
       router.push("/queue");
       router.refresh();
@@ -78,15 +81,19 @@ export function StudioCreateView() {
   return (
     <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
       <article className="relative isolate overflow-hidden rounded-[2.2rem] border border-cyan-100/20 bg-slate-950/55 p-5 backdrop-blur-2xl md:p-7">
-        <OglLiquidRibbon className="pointer-events-none absolute inset-0 opacity-60" />
-        <RapierFloatField className="pointer-events-none absolute inset-0 opacity-40" count={8} />
+        <EffectsErrorBoundary>
+          <OglLiquidRibbon className="pointer-events-none absolute inset-0 opacity-60" />
+        </EffectsErrorBoundary>
+        <EffectsErrorBoundary>
+          <RapierFloatField className="pointer-events-none absolute inset-0 opacity-40" count={8} />
+        </EffectsErrorBoundary>
         <div className="relative z-10">
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-100/35 bg-cyan-300/10 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-cyan-100">
             <span className="h-2 w-2 rounded-full bg-cyan-200 shadow-[0_0_16px_rgba(103,232,249,1)]" />
             Generative Command Deck
           </div>
           <h2 className="text-2xl font-semibold leading-tight md:text-4xl">
-            <VFXSpan shader="glitch">Build image and video jobs with a fully instrumented RunPod pipeline.</VFXSpan>
+            Build image and video jobs with a fully instrumented RunPod pipeline.
           </h2>
 
           <label className="mt-6 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Prompt</label>
@@ -95,6 +102,14 @@ export function StudioCreateView() {
             placeholder="Describe scene, camera movement, lens behavior, mood, texture, and composition..."
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
+          />
+
+          <label className="mt-4 block text-xs uppercase tracking-[0.2em] text-rose-200/80">Negative Prompt</label>
+          <textarea
+            className="mt-2 h-20 w-full resize-y rounded-3xl border border-rose-300/20 bg-slate-900/70 p-4 text-sm outline-none ring-rose-300/30 transition focus:ring"
+            placeholder="Elements to avoid: blur, distortion, watermark, low quality..."
+            value={negativePrompt}
+            onChange={(event) => setNegativePrompt(event.target.value)}
           />
 
           <div className="mt-4 flex flex-wrap gap-2">
@@ -229,14 +244,16 @@ export function StudioCreateView() {
 
       <article className="rounded-[2.2rem] border border-cyan-100/20 bg-slate-950/55 p-5 backdrop-blur-2xl md:p-6">
         <h3 className="text-xl font-semibold">
-          <VFXSpan shader="rgbShift">Render Reactor</VFXSpan>
+          Render Reactor
         </h3>
         <p className="mt-2 text-sm text-cyan-100/80">
           Model output is persisted to Supabase, status is synchronized through queue polling, and media is surfaced in
           library playback/download.
         </p>
         <div className="mt-4">
-          <PostFxHalo />
+          <EffectsErrorBoundary>
+            <PostFxHalo />
+          </EffectsErrorBoundary>
         </div>
         <div className="mt-4 space-y-3 text-xs text-cyan-100/75">
           <p>Video modes: WAN 2.6 T2V + WAN 2.6 I2V</p>
