@@ -7,53 +7,35 @@ export const isActiveJob = (status: string) =>
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
+/**
+ * Returns the best available progress percentage for a job.
+ *
+ * Priority:
+ * 1. Terminal states → 100%
+ * 2. Real RunPod progress_update() percentage (from output field during IN_PROGRESS)
+ * 3. Timing-based estimate as fallback only when RunPod hasn't reported progress
+ */
 export const getRealtimeProgressPercent = (job: JobResponse): number => {
-  // Terminal states always 100%
   if (job.status === "COMPLETED") return 100;
   if (TERMINAL_FAILURE.has(job.status)) return 100;
 
-  // Real RunPod progress % from progress_update() – always preferred
+  // Real RunPod progress — always preferred
   if (typeof job.progressPercent === "number" && job.progressPercent > 0) {
     return clamp(Math.round(job.progressPercent), 1, 99);
   }
 
-  // Timing-derived fallback only when RunPod hasn't reported real progress
+  // Timing fallback when RunPod hasn't reported real progress
   if (job.status === "IN_QUEUE" || job.status === "RETRY" || job.status === "THROTTLED") {
     const queueMs = Math.max(0, job.delayTimeMs || 0);
-    return clamp(8 + Math.round(queueMs / 820), 8, 38);
+    return clamp(5 + Math.round(queueMs / 1000), 5, 30);
   }
 
   if (job.status === "IN_PROGRESS") {
     const execMs = Math.max(0, job.executionTimeMs || 0);
-    return clamp(42 + Math.round(execMs / 740), 42, 96);
+    return clamp(35 + Math.round(execMs / 800), 35, 95);
   }
 
   return 0;
-};
-
-export const getProgressSource = (job: JobResponse): "runpod" | "timing" | "terminal" => {
-  if (job.status === "COMPLETED" || TERMINAL_FAILURE.has(job.status)) return "terminal";
-  if (typeof job.progressPercent === "number" && job.progressPercent > 0) return "runpod";
-  return "timing";
-};
-
-export const getAdaptivePollMs = (jobs: JobResponse[], failureStreak: number): number => {
-  const active = jobs.filter((job) => isActiveJob(job.status));
-  if (!active.length) return 9000;
-
-  const inProgress = active.some((job) => job.status === "IN_PROGRESS");
-  const queueOnly = active.every((job) => job.status === "IN_QUEUE" || job.status === "RETRY" || job.status === "THROTTLED");
-
-  let base = 7000;
-  if (inProgress) base = 4500;
-  if (queueOnly) base = 8200;
-  if (active.length >= 4) base += 1800;
-  if (active.length >= 8) base += 2400;
-
-  const backoff = Math.min(failureStreak * 2300, 22000);
-  const jitter = Math.round(Math.random() * 700);
-
-  return base + backoff + jitter;
 };
 
 export const formatDurationMs = (value: number | null): string => {

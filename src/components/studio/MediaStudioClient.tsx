@@ -13,7 +13,7 @@ import { OglNebulaBackground } from "@/components/effects/OglNebulaBackground";
 import { PostFxHalo } from "@/components/effects/PostFxHalo";
 import { PhysicsIcons } from "@/components/effects/PhysicsIcons";
 import { PremiumProgressBar } from "@/components/effects/PremiumProgressBar";
-import { getProgressSource, getRealtimeProgressPercent } from "@/lib/job-progress";
+import { getRealtimeProgressPercent } from "@/lib/job-progress";
 import type { JobResponse, LibraryItem } from "@/types/app";
 
 interface Props {
@@ -345,7 +345,6 @@ export function MediaStudioClient({ userEmail }: Props) {
                 {jobs.length === 0 ? <p className="text-sm text-slate-300/75">No jobs yet.</p> : null}
                 {jobs.map((job) => {
                   const progress = getRealtimeProgressPercent(job);
-                  const source = getProgressSource(job);
                   const barStatus = job.status === "COMPLETED" ? "completed" as const
                     : (job.status === "FAILED" || job.status === "TIMED_OUT" || job.status === "CANCELLED") ? "failed" as const
                     : "active" as const;
@@ -358,24 +357,9 @@ export function MediaStudioClient({ userEmail }: Props) {
                       </div>
                       <p className="mt-2 line-clamp-2 text-slate-200/90">{job.prompt}</p>
 
-                      {/* Premium progress bar with real RunPod % */}
                       <div className="mt-3">
                         <div className="mb-1 flex items-center justify-between text-xs text-slate-300/85">
-                          <span className="flex items-center gap-1.5">
-                            <span
-                              className={`inline-block h-1.5 w-1.5 rounded-full ${
-                                source === "runpod"
-                                  ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
-                                  : source === "timing"
-                                    ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.8)]"
-                                    : "bg-slate-400"
-                              }`}
-                            />
-                            {progress}%
-                          </span>
-                          <span className="text-[10px] uppercase tracking-wider opacity-70">
-                            {source === "runpod" ? "LIVE" : source === "timing" ? "EST" : "DONE"}
-                          </span>
+                          <span>{progress}%</span>
                         </div>
                         <PremiumProgressBar progress={progress} status={barStatus} className="h-3" />
                       </div>

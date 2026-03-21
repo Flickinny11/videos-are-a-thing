@@ -3,13 +3,12 @@
 import gsap from "gsap";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { EffectsErrorBoundary } from "@/components/app/EffectsErrorBoundary";
 import { InteractiveButton } from "@/components/effects/InteractiveButton";
 import { OglLiquidRibbon } from "@/components/effects/OglLiquidRibbon";
 import { RapierFloatField } from "@/components/effects/RapierFloatField";
-import { WebGLRefreshButton } from "@/components/effects/WebGLRefreshButton";
 import { downloadFile } from "@/lib/download";
 import type { LibraryItem } from "@/types/app";
 
@@ -18,10 +17,16 @@ type FilterKind = "all" | "video" | "image";
 const ITEMS_PER_PAGE = 10;
 
 /**
- * Single-play video player: pauses all other videos when one starts.
- * Uses preload="none" so videos don't buffer until the user taps play.
+ * Memoized video player that NEVER re-renders when the parent list updates.
+ * This prevents video playback from being interrupted by background refreshes.
  */
-function LazyVideo({ src, onPlay }: { src: string; onPlay: (el: HTMLVideoElement) => void }) {
+const StableVideo = memo(function StableVideo({
+  src,
+  onPlay,
+}: {
+  src: string;
+  onPlay: (el: HTMLVideoElement) => void;
+}) {
   const ref = useRef<HTMLVideoElement | null>(null);
 
   return (
@@ -37,7 +42,10 @@ function LazyVideo({ src, onPlay }: { src: string; onPlay: (el: HTMLVideoElement
       }}
     />
   );
-}
+},
+// Only re-render if the src actually changes (same item, same URL = skip)
+(prev, next) => prev.src === next.src,
+);
 
 export function LibraryView() {
   const router = useRouter();
@@ -50,29 +58,73 @@ export function LibraryView() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const activeVideoRef = useRef<HTMLVideoElement | null>(null);
+  const isVideoPlayingRef = useRef(false);
+
+  // Smart merge: only update items that actually changed, preserving references
+  // for items that haven't changed (so React skips re-rendering their children).
+  const mergeItems = useCallback((incoming: LibraryItem[]) => {
+    setItems((current) => {
+      if (!current.length) return incoming;
+
+      const currentMap = new Map(current.map((item) => [item.id, item]));
+      const incomingIds = new Set(incoming.map((item) => item.id));
+
+      // Check if anything actually changed
+      if (
+        current.length === incoming.length &&
+        incoming.every((item) => currentMap.has(item.id))
+      ) {
+        // Same set of items — update only metadata that changed, preserve playUrl
+        // references to avoid re-mounting video elements
+        let anyChanged = false;
+        const merged = current.map((existing) => {
+          const fresh = incoming.find((i) => i.id === existing.id);
+          if (!fresh) return existing;
+          // Keep the existing object reference if nothing meaningful changed
+          if (
+            existing.prompt === fresh.prompt &&
+            existing.model === fresh.model &&
+            existing.kind === fresh.kind
+          ) {
+            return existing;
+          }
+          anyChanged = true;
+          return { ...fresh, playUrl: existing.playUrl, downloadUrl: existing.downloadUrl };
+        });
+        return anyChanged ? merged : current;
+      }
+
+      // Items added or removed — rebuild but preserve existing references where possible
+      return incoming.map((item) => currentMap.get(item.id) || item);
+    });
+  }, []);
 
   const fetchLibrary = useCallback(async () => {
     try {
       const response = await fetch("/api/library", { cache: "no-store" });
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.message || "Failed to load library");
-      setItems(data.items || []);
+      mergeItems(data.items || []);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load library");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [mergeItems]);
 
+  // Initial load
   useEffect(() => {
     void fetchLibrary();
   }, [fetchLibrary]);
 
+  // Auto-refresh: poll for new items, but SKIP if a video is playing
   useEffect(() => {
     const interval = window.setInterval(() => {
-      void fetchLibrary();
-    }, 18000);
+      if (!isVideoPlayingRef.current) {
+        void fetchLibrary();
+      }
+    }, 12000);
 
     return () => window.clearInterval(interval);
   }, [fetchLibrary]);
@@ -82,12 +134,10 @@ export function LibraryView() {
     return items.filter((item) => item.kind === filter);
   }, [items, filter]);
 
-  // Reset page when filter changes or items change significantly
   useEffect(() => {
     setPage(1);
   }, [filter]);
 
-  // Pagination
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / ITEMS_PER_PAGE));
   const clampedPage = Math.min(page, totalPages);
   const paginatedItems = useMemo(
@@ -95,24 +145,33 @@ export function LibraryView() {
     [filteredItems, clampedPage],
   );
 
-  // Ensure page stays in bounds
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  // Single-video playback: pause all others when one starts
   const handleVideoPlay = useCallback((el: HTMLVideoElement) => {
     if (activeVideoRef.current && activeVideoRef.current !== el) {
       activeVideoRef.current.pause();
     }
     activeVideoRef.current = el;
+    isVideoPlayingRef.current = true;
+
+    // Track when video stops playing so auto-refresh can resume
+    const onPause = () => {
+      isVideoPlayingRef.current = false;
+    };
+    const onEnded = () => {
+      isVideoPlayingRef.current = false;
+    };
+    el.addEventListener("pause", onPause, { once: true });
+    el.addEventListener("ended", onEnded, { once: true });
   }, []);
 
-  // Pause active video on page change so off-screen videos aren't playing
   useEffect(() => {
     if (activeVideoRef.current) {
       activeVideoRef.current.pause();
       activeVideoRef.current = null;
+      isVideoPlayingRef.current = false;
     }
   }, [clampedPage]);
 
@@ -235,7 +294,6 @@ export function LibraryView() {
 
   const goToPage = (p: number) => {
     setPage(Math.max(1, Math.min(p, totalPages)));
-    // Scroll to top of grid on page change
     gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
@@ -272,7 +330,6 @@ export function LibraryView() {
                 {value}
               </button>
             ))}
-            <WebGLRefreshButton onClick={() => fetchLibrary()} />
           </div>
         </div>
       </article>
@@ -292,7 +349,7 @@ export function LibraryView() {
             >
               <div className="mb-3 overflow-hidden rounded-2xl border border-cyan-100/20">
                 {item.kind === "video" ? (
-                  <LazyVideo src={item.playUrl} onPlay={handleVideoPlay} />
+                  <StableVideo src={item.playUrl} onPlay={handleVideoPlay} />
                 ) : (
                   <Image
                     src={item.playUrl}
@@ -343,7 +400,6 @@ export function LibraryView() {
           ))}
         </div>
 
-        {/* Pagination controls */}
         {totalPages > 1 ? (
           <nav className="mt-6 flex items-center justify-center gap-2">
             <button
@@ -360,9 +416,7 @@ export function LibraryView() {
             </button>
 
             {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => {
-              // Show at most 5 page buttons centered around current page
               if (totalPages > 7 && Math.abs(p - clampedPage) > 2 && p !== 1 && p !== totalPages) {
-                // Show ellipsis marker
                 if (p === clampedPage - 3 || p === clampedPage + 3) {
                   return (
                     <span key={p} className="px-1 text-xs text-cyan-100/50">
@@ -404,7 +458,6 @@ export function LibraryView() {
           </nav>
         ) : null}
 
-        {/* Page info */}
         {filteredItems.length > 0 ? (
           <p className="mt-3 text-center text-[11px] uppercase tracking-[0.15em] text-cyan-100/55">
             Showing {(clampedPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(clampedPage * ITEMS_PER_PAGE, filteredItems.length)} of {filteredItems.length} items
