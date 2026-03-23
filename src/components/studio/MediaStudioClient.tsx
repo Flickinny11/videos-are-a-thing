@@ -35,7 +35,7 @@ export function MediaStudioClient({ userEmail }: Props) {
   const [videoMode, setVideoMode] = useState<"i2v" | "t2v">("t2v");
   const [duration, setDuration] = useState<5 | 10 | 15>(5);
   const [resolution, setResolution] = useState<"720p" | "1080p">("720p");
-  const [imageModel, setImageModel] = useState<"qwen" | "qwen-t2i" | "flux" | "flux-dev" | "flux-schnell">("flux-schnell");
+  const [imageModel, setImageModel] = useState<string>("flux-schnell");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const [library, setLibrary] = useState<LibraryItem[]>([]);
@@ -48,7 +48,8 @@ export function MediaStudioClient({ userEmail }: Props) {
   const fileRequired = useMemo(
     () => {
       if (mediaType === "video") return videoMode === "i2v";
-      if (imageModel === "flux-dev" || imageModel === "flux-schnell" || imageModel === "qwen-t2i") return false;
+      const textOnlyModels = ["flux-dev", "flux-schnell", "qwen-t2i"];
+      if (textOnlyModels.includes(imageModel)) return false;
       return true;
     },
     [mediaType, videoMode, imageModel],
@@ -346,7 +347,7 @@ export function MediaStudioClient({ userEmail }: Props) {
                   <select
                     className="w-full rounded-xl border border-cyan-200/25 bg-slate-900/70 p-3 text-sm"
                     value={imageModel}
-                    onChange={(event) => setImageModel(event.target.value as "qwen" | "qwen-t2i" | "flux" | "flux-dev" | "flux-schnell")}
+                    onChange={(event) => setImageModel(event.target.value)}
                   >
                     <optgroup label="Text-to-Image (no upload needed)">
                       <option value="flux-schnell">Flux 1 Schnell (fast)</option>
@@ -356,6 +357,11 @@ export function MediaStudioClient({ userEmail }: Props) {
                     <optgroup label="Image-to-Image (upload required)">
                       <option value="flux">Flux Kontext Dev (edit)</option>
                       <option value="qwen">Qwen Image Edit</option>
+                      <option value="qwen-2511">Qwen Image Edit 2511</option>
+                      <option value="p-edit">P-Image Edit ($0.01)</option>
+                      <option value="seedream-edit">Seedream 4.0 Edit</option>
+                      <option value="nano-banana">Nano Banana Edit</option>
+                      <option value="z-turbo">Z-Image Turbo (i2i)</option>
                     </optgroup>
                   </select>
                   {fileRequired ? (

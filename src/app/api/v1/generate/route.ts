@@ -86,7 +86,12 @@ export async function POST(request: Request) {
 
     if (!prompt) return fail("prompt is required.");
 
-    const validModes: JobMode[] = ["video:t2v", "video:i2v", "image:flux", "image:flux-dev", "image:flux-schnell", "image:qwen-t2i", "image:qwen"];
+    const validModes: JobMode[] = [
+      "video:t2v", "video:i2v",
+      "image:flux", "image:flux-dev", "image:flux-schnell",
+      "image:qwen-t2i", "image:qwen", "image:qwen-2511",
+      "image:p-edit", "image:seedream-edit", "image:nano-banana", "image:z-turbo",
+    ];
     if (!validModes.includes(service as JobMode)) {
       return fail(`service must be one of: ${validModes.join(", ")}`);
     }
@@ -95,7 +100,8 @@ export async function POST(request: Request) {
     duration = [5, 10, 15].includes(duration) ? duration : 5;
     if (!["720p", "1080p"].includes(resolution)) resolution = "720p";
 
-    const fileRequired = mode === "video:i2v" || mode === "image:flux" || mode === "image:qwen";
+    const textOnlyModes: JobMode[] = ["video:t2v", "image:flux-dev", "image:flux-schnell", "image:qwen-t2i"];
+    const fileRequired = !textOnlyModes.includes(mode);
     let inputPath: string | null = null;
     let inputSignedUrl: string | undefined;
 

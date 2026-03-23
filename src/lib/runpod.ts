@@ -11,6 +11,11 @@ const MODEL_ENDPOINT_BY_MODE: Record<JobMode, string> = {
   "image:flux-schnell": "black-forest-labs-flux-1-schnell",
   "image:qwen-t2i": "qwen-image-t2i",
   "image:qwen": "qwen-image-edit",
+  "image:qwen-2511": "qwen-image-edit-2511",
+  "image:p-edit": "p-image-edit",
+  "image:seedream-edit": "seedream-v4-edit",
+  "image:nano-banana": "nano-banana-edit",
+  "image:z-turbo": "z-image-turbo",
 };
 
 export interface RunpodStartRequest {
@@ -228,14 +233,65 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
         image,
         seed: -1,
         enable_safety_checker: false,
-        safety_checker: false,
-        nsfw: true,
       };
 
       return [
         withInputWrapper(base),
         withInputWrapper({ ...base, image_url: image }),
-        withInputWrapper({ ...base, instruction: input.prompt }),
+      ];
+    }
+    case "image:qwen-2511": {
+      const image = input.inputImageUrl;
+      return [
+        withInputWrapper({
+          prompt: input.prompt,
+          images: [image],
+          seed: -1,
+          output_format: "png",
+        }),
+      ];
+    }
+    case "image:p-edit": {
+      const image = input.inputImageUrl;
+      return [
+        withInputWrapper({
+          prompt: input.prompt,
+          images: [image],
+          seed: -1,
+          disable_safety_checker: true,
+        }),
+      ];
+    }
+    case "image:seedream-edit": {
+      const image = input.inputImageUrl;
+      return [
+        withInputWrapper({
+          prompt: input.prompt,
+          images: [image],
+          enable_safety_checker: false,
+        }),
+      ];
+    }
+    case "image:nano-banana": {
+      const image = input.inputImageUrl;
+      return [
+        withInputWrapper({
+          prompt: input.prompt,
+          images: [image],
+          enable_safety_checker: false,
+        }),
+      ];
+    }
+    case "image:z-turbo": {
+      const image = input.inputImageUrl;
+      return [
+        withInputWrapper({
+          prompt: input.prompt,
+          image,
+          strength: 0.8,
+          seed: -1,
+          enable_safety_checker: false,
+        }),
       ];
     }
     default:

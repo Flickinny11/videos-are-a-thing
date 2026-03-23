@@ -84,14 +84,20 @@ export async function POST(request: Request) {
       const imageModelMap: Record<string, JobMode> = {
         qwen: "image:qwen",
         "qwen-t2i": "image:qwen-t2i",
+        "qwen-2511": "image:qwen-2511",
         flux: "image:flux",
         "flux-dev": "image:flux-dev",
         "flux-schnell": "image:flux-schnell",
+        "p-edit": "image:p-edit",
+        "seedream-edit": "image:seedream-edit",
+        "nano-banana": "image:nano-banana",
+        "z-turbo": "image:z-turbo",
       };
       mode = imageModelMap[imageModel] || "image:flux-schnell";
     }
 
-    const fileRequired = mode === "video:i2v" || mode === "image:flux" || mode === "image:qwen";
+    const textOnlyModes: JobMode[] = ["video:t2v", "image:flux-dev", "image:flux-schnell", "image:qwen-t2i"];
+    const fileRequired = !textOnlyModes.includes(mode);
     let inputPath: string | null = null;
     let inputSignedUrl: string | undefined;
 
