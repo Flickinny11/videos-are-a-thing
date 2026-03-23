@@ -50,40 +50,56 @@ export function QueueView() {
     }
   }, []);
 
+  const pollingRef = useRef(false);
+  const jobsRef = useRef(jobs);
+  jobsRef.current = jobs;
+
   // Poll active jobs for real RunPod progress, then merge updates
   const pollActiveJobs = useCallback(async () => {
-    if (!activeJobs.length || !mountedRef.current) return;
+    if (pollingRef.current || !mountedRef.current) return;
+    pollingRef.current = true;
 
-    const settled = await Promise.allSettled(
-      activeJobs.map(async (job) => {
-        const response = await fetch(`/api/jobs/${job.id}/poll`, { method: "POST", cache: "no-store" });
-        const data = await response.json().catch(() => null);
-        if (!response.ok || !data?.success) {
-          throw new Error(data?.message || `Poll failed (${response.status})`);
-        }
-        return data.job as JobResponse;
-      }),
-    );
+    try {
+      const currentJobs = jobsRef.current;
+      const active = currentJobs.filter((job) => isActiveJob(job.status));
 
-    if (!mountedRef.current) return;
+      if (!active.length) {
+        await fetchJobs();
+        return;
+      }
 
-    const successes = settled
-      .filter((item): item is PromiseFulfilledResult<JobResponse> => item.status === "fulfilled")
-      .map((item) => item.value);
+      const settled = await Promise.allSettled(
+        active.map(async (job) => {
+          const response = await fetch(`/api/jobs/${job.id}/poll`, { method: "POST", cache: "no-store" });
+          const data = await response.json().catch(() => null);
+          if (!response.ok || !data?.success) return null;
+          return data.job as JobResponse;
+        }),
+      );
 
-    if (successes.length) {
-      const patch = new Map(successes.map((job) => [job.id, job]));
-      setJobs((current) => current.map((job) => patch.get(job.id) || job));
+      if (!mountedRef.current) return;
+
+      const successes = settled
+        .filter((item): item is PromiseFulfilledResult<JobResponse | null> => item.status === "fulfilled")
+        .map((item) => item.value)
+        .filter((v): v is JobResponse => v !== null);
+
+      if (successes.length) {
+        const patch = new Map(successes.map((job) => [job.id, job]));
+        setJobs((current) => current.map((job) => patch.get(job.id) || job));
+      }
+
+      // If any jobs just completed, do a full refresh to pick up new library items
+      const justCompleted = successes.some(
+        (s) => s.status === "COMPLETED" && active.find((a) => a.id === s.id)?.status !== "COMPLETED",
+      );
+      if (justCompleted) {
+        await fetchJobs();
+      }
+    } finally {
+      pollingRef.current = false;
     }
-
-    // If any jobs just completed, do a full refresh to pick up new library items
-    const justCompleted = successes.some(
-      (s) => s.status === "COMPLETED" && activeJobs.find((a) => a.id === s.id)?.status !== "COMPLETED",
-    );
-    if (justCompleted) {
-      await fetchJobs();
-    }
-  }, [activeJobs, fetchJobs]);
+  }, [fetchJobs]);
 
   // Initial load
   useEffect(() => {
@@ -93,21 +109,16 @@ export function QueueView() {
   }, [fetchJobs]);
 
   // Auto-poll: 3s when jobs are in-progress, 6s when queued, 15s when idle.
-  // No manual refresh needed.
   useEffect(() => {
     const getPollInterval = () => {
-      if (!activeJobs.length) return 15000; // Slow poll when idle (picks up new jobs)
-      const hasInProgress = activeJobs.some((j) => j.status === "IN_PROGRESS");
-      return hasInProgress ? 3000 : 6000;
+      if (!hasActive) return 15000;
+      const inProgress = activeJobs.some((j) => j.status === "IN_PROGRESS");
+      return inProgress ? 3000 : 6000;
     };
 
     const tick = async () => {
       if (!mountedRef.current) return;
-      if (activeJobs.length > 0) {
-        await pollActiveJobs();
-      } else {
-        await fetchJobs();
-      }
+      await pollActiveJobs();
       if (mountedRef.current) {
         pollTimerRef.current = window.setTimeout(tick, getPollInterval());
       }
@@ -115,7 +126,7 @@ export function QueueView() {
 
     pollTimerRef.current = window.setTimeout(tick, getPollInterval());
     return () => window.clearTimeout(pollTimerRef.current);
-  }, [activeJobs, pollActiveJobs, fetchJobs]);
+  }, [hasActive, pollActiveJobs]);
 
   return (
     <section className="space-y-6">

@@ -267,30 +267,46 @@ export const getUserLibrary = async (userId: string): Promise<LibraryItem[]> => 
     });
   }
 
-  const items = await Promise.all(
-    rows.map(async (row) => {
-      const signed = await supabaseService.storage
-        .from("media-library")
-        .createSignedUrl(row.storage_path, 60 * 60);
+  // Use batch signed URL creation to avoid overwhelming Supabase with
+  // individual requests (prevents "too many nodes" errors)
+  const paths = rows.map((row) => row.storage_path);
+  const signedUrls = new Map<string, string>();
 
-      if (signed.error || !signed.data?.signedUrl) {
-        throw new Error(signed.error?.message || "Could not create signed playback URL.");
+  // Supabase createSignedUrls (plural) handles batching internally
+  if (paths.length) {
+    const batch = await supabaseService.storage
+      .from("media-library")
+      .createSignedUrls(paths, 60 * 60);
+
+    if (batch.error) {
+      throw new Error(batch.error.message);
+    }
+
+    for (const entry of batch.data || []) {
+      if (entry.signedUrl && entry.path) {
+        signedUrls.set(entry.path, entry.signedUrl);
       }
+    }
+  }
 
-      return {
-        id: row.id,
-        jobId: row.job_id,
-        mode: modeByJobId.get(row.job_id) || null,
-        kind: row.kind,
-        playUrl: signed.data.signedUrl,
-        downloadUrl: signed.data.signedUrl,
-        createdAt: row.created_at,
-        prompt: row.prompt,
-        model: row.model,
-        mimeType: row.mime_type,
-      } satisfies LibraryItem;
-    }),
-  );
+  const items: LibraryItem[] = [];
+  for (const row of rows) {
+    const url = signedUrls.get(row.storage_path);
+    if (!url) continue; // Skip items where signed URL failed
+
+    items.push({
+      id: row.id,
+      jobId: row.job_id,
+      mode: modeByJobId.get(row.job_id) || null,
+      kind: row.kind,
+      playUrl: url,
+      downloadUrl: url,
+      createdAt: row.created_at,
+      prompt: row.prompt,
+      model: row.model,
+      mimeType: row.mime_type,
+    });
+  }
 
   return items;
 };

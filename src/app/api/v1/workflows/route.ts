@@ -79,7 +79,7 @@ export async function POST(request: Request) {
     if (!steps.length) return fail("At least one step is required.");
     if (steps.length > 20) return fail("Maximum 20 steps per workflow.");
 
-    const validModes: JobMode[] = ["video:t2v", "video:i2v", "image:flux", "image:qwen"];
+    const validModes: JobMode[] = ["video:t2v", "video:i2v", "image:flux", "image:flux-dev", "image:flux-schnell", "image:qwen"];
 
     const results = await Promise.allSettled(
       steps.map(async (step, index) => {

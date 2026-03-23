@@ -81,7 +81,13 @@ export async function POST(request: Request) {
     if (mediaType === "video") {
       mode = videoMode === "i2v" ? "video:i2v" : "video:t2v";
     } else {
-      mode = imageModel === "qwen" ? "image:qwen" : "image:flux";
+      const imageModelMap: Record<string, JobMode> = {
+        qwen: "image:qwen",
+        flux: "image:flux",
+        "flux-dev": "image:flux-dev",
+        "flux-schnell": "image:flux-schnell",
+      };
+      mode = imageModelMap[imageModel] || "image:flux-schnell";
     }
 
     const fileRequired = mode === "video:i2v" || mode === "image:flux" || mode === "image:qwen";
