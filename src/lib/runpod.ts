@@ -7,6 +7,8 @@ const MODEL_ENDPOINT_BY_MODE: Record<JobMode, string> = {
   "video:t2v": "wan-2-6-t2v",
   "video:i2v": "wan-2-6-i2v",
   "image:flux": "black-forest-labs-flux-1-kontext-dev",
+  "image:flux-dev": "black-forest-labs-flux-1-dev",
+  "image:flux-schnell": "black-forest-labs-flux-1-schnell",
   "image:qwen": "qwen-image-edit",
 };
 
@@ -105,12 +107,13 @@ const withInputWrapper = (payload: Record<string, unknown>) => ({
   input: payload,
 });
 
-const withSafetyFallback = (payload: Record<string, unknown>) => [
+const withSafetyDisabled = (payload: Record<string, unknown>) => [
   withInputWrapper({
     ...payload,
     enable_safety_checker: false,
+    safety_checker: false,
+    nsfw: true,
   }),
-  withInputWrapper(payload),
 ];
 
 const sizeForResolution = (resolution?: "720p" | "1080p"): string =>
@@ -132,10 +135,13 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
         size: sizeForResolution(input.resolution),
         seed: -1,
         enable_prompt_expansion: false,
+        enable_safety_checker: false,
+        safety_checker: false,
+        nsfw: true,
       };
 
       return [
-        ...withSafetyFallback(base),
+        withInputWrapper(base),
         withInputWrapper({ ...base, video_length: duration }),
       ];
     }
@@ -150,10 +156,13 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
         size: sizeForResolution(input.resolution),
         seed: -1,
         enable_prompt_expansion: false,
+        enable_safety_checker: false,
+        safety_checker: false,
+        nsfw: true,
       };
 
       return [
-        ...withSafetyFallback(base),
+        withInputWrapper(base),
         withInputWrapper({ ...base, image_url: image }),
         withInputWrapper({ ...base, input_image: image }),
       ];
@@ -167,12 +176,46 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
         seed: -1,
         guidance_scale: 2.5,
         num_inference_steps: 30,
+        enable_safety_checker: false,
+        safety_checker: false,
+        nsfw: true,
       };
 
       return [
-        ...withSafetyFallback(base),
+        withInputWrapper(base),
         withInputWrapper({ ...base, image_url: image }),
       ];
+    }
+    case "image:flux-dev": {
+      const base = {
+        prompt: input.prompt,
+        ...neg,
+        seed: -1,
+        guidance_scale: 3.5,
+        num_inference_steps: 28,
+        width: 1024,
+        height: 1024,
+        enable_safety_checker: false,
+        safety_checker: false,
+        nsfw: true,
+      };
+
+      return [withInputWrapper(base)];
+    }
+    case "image:flux-schnell": {
+      const base = {
+        prompt: input.prompt,
+        ...neg,
+        seed: -1,
+        num_inference_steps: 4,
+        width: 1024,
+        height: 1024,
+        enable_safety_checker: false,
+        safety_checker: false,
+        nsfw: true,
+      };
+
+      return [withInputWrapper(base)];
     }
     case "image:qwen": {
       const image = input.inputImageUrl;
@@ -181,16 +224,19 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
         ...neg,
         image,
         seed: -1,
+        enable_safety_checker: false,
+        safety_checker: false,
+        nsfw: true,
       };
 
       return [
-        ...withSafetyFallback(base),
+        withInputWrapper(base),
         withInputWrapper({ ...base, image_url: image }),
         withInputWrapper({ ...base, instruction: input.prompt }),
       ];
     }
     default:
-      return withSafetyFallback({ prompt: input.prompt, ...neg });
+      return withSafetyDisabled({ prompt: input.prompt, ...neg });
   }
 };
 

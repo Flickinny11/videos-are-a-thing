@@ -16,15 +16,20 @@ export function StudioCreateView() {
   const [videoMode, setVideoMode] = useState<"i2v" | "t2v">("t2v");
   const [duration, setDuration] = useState<5 | 10 | 15>(5);
   const [resolution, setResolution] = useState<"720p" | "1080p">("720p");
-  const [imageModel, setImageModel] = useState<"qwen" | "flux">("qwen");
+  const [imageModel, setImageModel] = useState<"qwen" | "flux" | "flux-dev" | "flux-schnell">("flux-schnell");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [flash, setFlash] = useState<string>("");
   const [error, setError] = useState("");
 
   const fileRequired = useMemo(
-    () => (mediaType === "video" ? videoMode === "i2v" : true),
-    [mediaType, videoMode],
+    () => {
+      if (mediaType === "video") return videoMode === "i2v";
+      // Text-to-image models don't need a file upload
+      if (imageModel === "flux-dev" || imageModel === "flux-schnell") return false;
+      return true; // flux (kontext) and qwen need input images
+    },
+    [mediaType, videoMode, imageModel],
   );
 
   const submit = async () => {
@@ -196,17 +201,25 @@ export function StudioCreateView() {
               <select
                 className="w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
                 value={imageModel}
-                onChange={(event) => setImageModel(event.target.value as "qwen" | "flux")}
+                onChange={(event) => setImageModel(event.target.value as "qwen" | "flux" | "flux-dev" | "flux-schnell")}
               >
-                <option value="qwen">Qwen Image Edit</option>
-                <option value="flux">Flux Kontext Dev</option>
+                <optgroup label="Text-to-Image (no upload needed)">
+                  <option value="flux-schnell">Flux 1 Schnell (fast)</option>
+                  <option value="flux-dev">Flux 1 Dev (quality)</option>
+                </optgroup>
+                <optgroup label="Image-to-Image (upload required)">
+                  <option value="flux">Flux Kontext Dev (edit)</option>
+                  <option value="qwen">Qwen Image Edit</option>
+                </optgroup>
               </select>
-              <input
-                type="file"
-                accept="image/*"
-                className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
-                onChange={(event) => setSourceFile(event.target.files?.[0] || null)}
-              />
+              {fileRequired ? (
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
+                  onChange={(event) => setSourceFile(event.target.files?.[0] || null)}
+                />
+              ) : null}
             </div>
           )}
 

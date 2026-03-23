@@ -35,7 +35,7 @@ export function MediaStudioClient({ userEmail }: Props) {
   const [videoMode, setVideoMode] = useState<"i2v" | "t2v">("t2v");
   const [duration, setDuration] = useState<5 | 10 | 15>(5);
   const [resolution, setResolution] = useState<"720p" | "1080p">("720p");
-  const [imageModel, setImageModel] = useState<"qwen" | "flux">("qwen");
+  const [imageModel, setImageModel] = useState<"qwen" | "flux" | "flux-dev" | "flux-schnell">("flux-schnell");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const [library, setLibrary] = useState<LibraryItem[]>([]);
@@ -46,8 +46,12 @@ export function MediaStudioClient({ userEmail }: Props) {
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   const fileRequired = useMemo(
-    () => (mediaType === "video" ? videoMode === "i2v" : true),
-    [mediaType, videoMode],
+    () => {
+      if (mediaType === "video") return videoMode === "i2v";
+      if (imageModel === "flux-dev" || imageModel === "flux-schnell") return false;
+      return true;
+    },
+    [mediaType, videoMode, imageModel],
   );
 
   const activeJobs = useMemo(() => jobs.filter((job) => isActive(job.status)), [jobs]);
@@ -66,24 +70,58 @@ export function MediaStudioClient({ userEmail }: Props) {
     setLibrary(data.items || []);
   }, []);
 
+  const pollingRef = useRef(false);
+  const mountedRef = useRef(true);
+
   const pollActiveJobs = useCallback(async () => {
-    const rows = activeJobs;
-    if (!rows.length) return;
+    if (pollingRef.current || !mountedRef.current) return;
+    pollingRef.current = true;
 
-    await Promise.all(
-      rows.map(async (job) => {
-        await fetch(`/api/jobs/${job.id}/poll`, {
-          method: "POST",
-          cache: "no-store",
-        });
-      }),
-    );
+    try {
+      const rows = jobs.filter((job) => isActive(job.status));
+      if (!rows.length) {
+        await fetchJobs();
+        return;
+      }
 
-    await fetchJobs();
-    await fetchLibrary();
-  }, [activeJobs, fetchJobs, fetchLibrary]);
+      const settled = await Promise.allSettled(
+        rows.map(async (job) => {
+          const response = await fetch(`/api/jobs/${job.id}/poll`, {
+            method: "POST",
+            cache: "no-store",
+          });
+          const data = await response.json().catch(() => null);
+          if (!response.ok || !data?.success) return null;
+          return data.job as JobResponse;
+        }),
+      );
+
+      if (!mountedRef.current) return;
+
+      const updates = settled
+        .filter((r): r is PromiseFulfilledResult<JobResponse | null> => r.status === "fulfilled")
+        .map((r) => r.value)
+        .filter((v): v is JobResponse => v !== null);
+
+      if (updates.length) {
+        const patch = new Map(updates.map((job) => [job.id, job]));
+        setJobs((current) => current.map((job) => patch.get(job.id) || job));
+
+        // If any jobs just completed, refresh library
+        const justCompleted = updates.some(
+          (u) => u.status === "COMPLETED" && rows.find((r) => r.id === u.id)?.status !== "COMPLETED",
+        );
+        if (justCompleted) {
+          await fetchLibrary();
+        }
+      }
+    } finally {
+      pollingRef.current = false;
+    }
+  }, [jobs, fetchJobs, fetchLibrary]);
 
   useEffect(() => {
+    mountedRef.current = true;
     const boot = async () => {
       try {
         await fetchJobs();
@@ -94,15 +132,24 @@ export function MediaStudioClient({ userEmail }: Props) {
     };
 
     void boot();
+    return () => { mountedRef.current = false; };
   }, [fetchJobs, fetchLibrary]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      void pollActiveJobs();
-    }, 2500);
+  // Adaptive polling: 3s when in-progress, 6s when queued, 15s when idle
+  const hasActive = activeJobs.length > 0;
+  const hasInProgress = activeJobs.some((j) => j.status === "IN_PROGRESS");
 
-    return () => clearInterval(interval);
-  }, [pollActiveJobs]);
+  useEffect(() => {
+    const interval = hasActive
+      ? (hasInProgress ? 3000 : 6000)
+      : 15000;
+
+    const timer = setInterval(() => {
+      void pollActiveJobs();
+    }, interval);
+
+    return () => clearInterval(timer);
+  }, [hasActive, hasInProgress, pollActiveJobs]);
 
   useEffect(() => {
     if (!panelRef.current) return;
@@ -296,17 +343,25 @@ export function MediaStudioClient({ userEmail }: Props) {
                   <select
                     className="w-full rounded-xl border border-cyan-200/25 bg-slate-900/70 p-3 text-sm"
                     value={imageModel}
-                    onChange={(event) => setImageModel(event.target.value as "qwen" | "flux")}
+                    onChange={(event) => setImageModel(event.target.value as "qwen" | "flux" | "flux-dev" | "flux-schnell")}
                   >
-                    <option value="qwen">Qwen Image Edit</option>
-                    <option value="flux">Flux Kontext Dev</option>
+                    <optgroup label="Text-to-Image (no upload needed)">
+                      <option value="flux-schnell">Flux 1 Schnell (fast)</option>
+                      <option value="flux-dev">Flux 1 Dev (quality)</option>
+                    </optgroup>
+                    <optgroup label="Image-to-Image (upload required)">
+                      <option value="flux">Flux Kontext Dev (edit)</option>
+                      <option value="qwen">Qwen Image Edit</option>
+                    </optgroup>
                   </select>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="block w-full rounded-xl border border-cyan-200/25 bg-slate-900/70 p-3 text-sm"
-                    onChange={(event) => setSourceFile(event.target.files?.[0] || null)}
-                  />
+                  {fileRequired ? (
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="block w-full rounded-xl border border-cyan-200/25 bg-slate-900/70 p-3 text-sm"
+                      onChange={(event) => setSourceFile(event.target.files?.[0] || null)}
+                    />
+                  ) : null}
                 </div>
               )}
 

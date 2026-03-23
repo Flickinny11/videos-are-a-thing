@@ -1,6 +1,6 @@
 export type MediaKind = "image" | "video";
 
-export type JobMode = "video:t2v" | "video:i2v" | "image:flux" | "image:qwen";
+export type JobMode = "video:t2v" | "video:i2v" | "image:flux" | "image:flux-dev" | "image:flux-schnell" | "image:qwen";
 
 export type JobStatus =
   | "IN_QUEUE"
