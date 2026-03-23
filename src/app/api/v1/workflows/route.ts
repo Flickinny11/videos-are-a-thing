@@ -79,7 +79,12 @@ export async function POST(request: Request) {
     if (!steps.length) return fail("At least one step is required.");
     if (steps.length > 20) return fail("Maximum 20 steps per workflow.");
 
-    const validModes: JobMode[] = ["video:t2v", "video:i2v", "image:flux", "image:flux-dev", "image:flux-schnell", "image:qwen-t2i", "image:qwen"];
+    const validModes: JobMode[] = [
+      "video:t2v", "video:i2v",
+      "image:flux", "image:flux-dev", "image:flux-schnell",
+      "image:qwen-t2i", "image:qwen", "image:qwen-2511",
+      "image:p-edit", "image:seedream-edit", "image:nano-banana", "image:z-turbo",
+    ];
 
     const results = await Promise.allSettled(
       steps.map(async (step, index) => {
@@ -91,7 +96,8 @@ export async function POST(request: Request) {
         }
 
         const mode = step.service;
-        const fileRequired = mode === "video:i2v" || mode === "image:flux" || mode === "image:qwen";
+        const textOnlyModes: JobMode[] = ["video:t2v", "image:flux-dev", "image:flux-schnell", "image:qwen-t2i"];
+        const fileRequired = !textOnlyModes.includes(mode);
 
         let inputSignedUrl = step.inputImageUrl;
         let inputPath: string | null = null;
