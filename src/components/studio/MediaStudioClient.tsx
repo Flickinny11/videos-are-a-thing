@@ -20,7 +20,7 @@ interface Props {
   userEmail: string;
 }
 
-const isActive = (status: string) => status === "IN_QUEUE" || status === "IN_PROGRESS" || status === "RETRY";
+const isActive = (status: string) => status === "IN_QUEUE" || status === "IN_PROGRESS" || status === "RETRY" || status === "THROTTLED";
 
 const statusTone = (status: string) => {
   if (status === "COMPLETED") return "text-emerald-300";
@@ -72,13 +72,16 @@ export function MediaStudioClient({ userEmail }: Props) {
 
   const pollingRef = useRef(false);
   const mountedRef = useRef(true);
+  const jobsRef = useRef(jobs);
+  jobsRef.current = jobs;
 
   const pollActiveJobs = useCallback(async () => {
     if (pollingRef.current || !mountedRef.current) return;
     pollingRef.current = true;
 
     try {
-      const rows = jobs.filter((job) => isActive(job.status));
+      const currentJobs = jobsRef.current;
+      const rows = currentJobs.filter((job) => isActive(job.status));
       if (!rows.length) {
         await fetchJobs();
         return;
@@ -118,7 +121,7 @@ export function MediaStudioClient({ userEmail }: Props) {
     } finally {
       pollingRef.current = false;
     }
-  }, [jobs, fetchJobs, fetchLibrary]);
+  }, [fetchJobs, fetchLibrary]);
 
   useEffect(() => {
     mountedRef.current = true;
