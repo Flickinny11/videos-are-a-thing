@@ -86,7 +86,7 @@ export async function POST(request: Request) {
 
     if (!prompt) return fail("prompt is required.");
 
-    const validModes: JobMode[] = ["video:t2v", "video:i2v", "image:flux", "image:flux-dev", "image:flux-schnell", "image:qwen"];
+    const validModes: JobMode[] = ["video:t2v", "video:i2v", "image:flux", "image:flux-dev", "image:flux-schnell", "image:qwen-t2i", "image:qwen"];
     if (!validModes.includes(service as JobMode)) {
       return fail(`service must be one of: ${validModes.join(", ")}`);
     }

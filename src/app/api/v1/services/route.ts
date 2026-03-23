@@ -85,6 +85,19 @@ export async function GET(request: Request) {
           },
         },
         {
+          id: "image:qwen-t2i",
+          name: "Qwen Image (text-to-image)",
+          endpoint: "qwen-image-t2i",
+          type: "image",
+          inputType: "text",
+          requiresImage: false,
+          safetyFilter: "disabled",
+          parameters: {
+            prompt: { type: "string", required: true },
+            negativePrompt: { type: "string", required: false },
+          },
+        },
+        {
           id: "image:qwen",
           name: "Qwen Image Edit (image-to-image)",
           endpoint: "qwen-image-edit",
