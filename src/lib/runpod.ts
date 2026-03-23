@@ -9,6 +9,7 @@ const MODEL_ENDPOINT_BY_MODE: Record<JobMode, string> = {
   "image:flux": "black-forest-labs-flux-1-kontext-dev",
   "image:flux-dev": "black-forest-labs-flux-1-dev",
   "image:flux-schnell": "black-forest-labs-flux-1-schnell",
+  "image:qwen-t2i": "qwen-image-t2i",
   "image:qwen": "qwen-image-edit",
 };
 
@@ -174,11 +175,9 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
         ...neg,
         image,
         seed: -1,
-        guidance_scale: 2.5,
+        guidance: 2.5,
         num_inference_steps: 30,
         enable_safety_checker: false,
-        safety_checker: false,
-        nsfw: true,
       };
 
       return [
@@ -191,13 +190,10 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
         prompt: input.prompt,
         ...neg,
         seed: -1,
-        guidance_scale: 3.5,
+        guidance: 7.5,
         num_inference_steps: 28,
         width: 1024,
         height: 1024,
-        enable_safety_checker: false,
-        safety_checker: false,
-        nsfw: true,
       };
 
       return [withInputWrapper(base)];
@@ -210,9 +206,16 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
         num_inference_steps: 4,
         width: 1024,
         height: 1024,
+      };
+
+      return [withInputWrapper(base)];
+    }
+    case "image:qwen-t2i": {
+      const base = {
+        prompt: input.prompt,
+        ...neg,
+        seed: -1,
         enable_safety_checker: false,
-        safety_checker: false,
-        nsfw: true,
       };
 
       return [withInputWrapper(base)];

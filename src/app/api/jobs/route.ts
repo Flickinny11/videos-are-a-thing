@@ -83,6 +83,7 @@ export async function POST(request: Request) {
     } else {
       const imageModelMap: Record<string, JobMode> = {
         qwen: "image:qwen",
+        "qwen-t2i": "image:qwen-t2i",
         flux: "image:flux",
         "flux-dev": "image:flux-dev",
         "flux-schnell": "image:flux-schnell",
