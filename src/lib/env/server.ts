@@ -12,4 +12,5 @@ export const envServer = {
   supabaseAccessToken: process.env.SUPABASE_ACCESS_TOKEN || "",
   supabaseProjectRef: required("SUPABASE_PROJECT_REF"),
   runpodApiKey: required("RUNPOD_API_KEY"),
+  falKey: process.env.FAL_KEY || "",
 };

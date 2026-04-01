@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth";
+import { FalError, falModelName, isFalMode, startFalJob } from "@/lib/fal";
 import {
   createGenerationJob,
   createJobEvent,
@@ -13,7 +14,21 @@ import type { JobMode } from "@/types/app";
 const fail = (message: string, status = 400) =>
   NextResponse.json({ success: false, message }, { status });
 
-const normalizeRunpodError = (error: unknown): { message: string; status: number } => {
+const normalizeProviderError = (error: unknown): { message: string; status: number } => {
+  if (error instanceof FalError) {
+    if (error.isBillingError) {
+      return {
+        message:
+          "fal.ai billing error: insufficient credits or limit reached. " +
+          "Please add credits to your fal.ai account and try again — no app restart needed.",
+        status: 402,
+      };
+    }
+    return {
+      message: `fal.ai request failed (HTTP ${error.httpStatus}): ${error.message}`,
+      status: 502,
+    };
+  }
   if (error instanceof RunpodError) {
     if (error.isBillingError) {
       return {
@@ -27,7 +42,7 @@ const normalizeRunpodError = (error: unknown): { message: string; status: number
     };
   }
   const text = error instanceof Error ? error.message : "Unknown error";
-  return { message: `RunPod request failed: ${text}`, status: 502 };
+  return { message: `Provider request failed: ${text}`, status: 502 };
 };
 
 /**
@@ -87,7 +102,7 @@ export async function POST(request: Request) {
     if (!prompt) return fail("prompt is required.");
 
     const validModes: JobMode[] = [
-      "video:t2v", "video:i2v",
+      "video:t2v", "video:i2v", "video:fal-i2v",
       "image:flux", "image:flux-dev", "image:flux-schnell",
       "image:qwen-t2i", "image:qwen", "image:qwen-2511",
       "image:p-edit", "image:seedream-edit", "image:nano-banana", "image:z-turbo",
@@ -114,22 +129,48 @@ export async function POST(request: Request) {
       inputSignedUrl = upload.signedUrl;
     }
 
-    let runpodResult;
-    try {
-      runpodResult = await startRunpodJob({
-        mode,
-        prompt,
-        negativePrompt,
-        durationSeconds: mode.startsWith("video") ? duration : undefined,
-        resolution: mode.startsWith("video") ? resolution : undefined,
-        inputImageUrl: inputSignedUrl,
-      });
-    } catch (error) {
-      const normalized = normalizeRunpodError(error);
-      return fail(normalized.message, normalized.status);
+    let providerJobId: string;
+    let providerStatus: import("@/types/app").JobStatus;
+    let providerRaw: Record<string, unknown>;
+    let model: string;
+
+    if (isFalMode(mode)) {
+      try {
+        const falResult = await startFalJob({
+          prompt,
+          imageUrl: inputSignedUrl!,
+          resolution,
+          duration: String(duration) as "5" | "10" | "15",
+          negativePrompt,
+        });
+        providerJobId = falResult.requestId;
+        providerStatus = falResult.status;
+        providerRaw = falResult.raw;
+        model = falModelName;
+      } catch (error) {
+        const normalized = normalizeProviderError(error);
+        return fail(normalized.message, normalized.status);
+      }
+    } else {
+      try {
+        const runpodResult = await startRunpodJob({
+          mode,
+          prompt,
+          negativePrompt,
+          durationSeconds: mode.startsWith("video") ? duration : undefined,
+          resolution: mode.startsWith("video") ? resolution : undefined,
+          inputImageUrl: inputSignedUrl,
+        });
+        providerJobId = runpodResult.id;
+        providerStatus = runpodResult.status;
+        providerRaw = runpodResult.raw;
+        model = runpodModelNameForMode(mode);
+      } catch (error) {
+        const normalized = normalizeProviderError(error);
+        return fail(normalized.message, normalized.status);
+      }
     }
 
-    const model = runpodModelNameForMode(mode);
     const jobRow = await createGenerationJob({
       userId: user.id,
       mode,
@@ -137,17 +178,18 @@ export async function POST(request: Request) {
       prompt,
       durationSeconds: mode.startsWith("video") ? duration : null,
       inputMediaPath: inputPath,
-      runpodJobId: runpodResult.id,
-      initialStatus: runpodResult.status,
-      runpodRaw: runpodResult.raw,
+      runpodJobId: providerJobId,
+      initialStatus: providerStatus,
+      runpodRaw: providerRaw,
     });
 
+    const providerName = isFalMode(mode) ? "fal.ai" : "RunPod";
     await createJobEvent(
       user.id,
       jobRow.id,
-      runpodResult.status,
-      `Job submitted via programmatic API with status ${runpodResult.status}.`,
-      runpodResult.raw,
+      providerStatus,
+      `Job submitted to ${providerName} via programmatic API with status ${providerStatus}.`,
+      providerRaw,
     );
 
     return NextResponse.json({

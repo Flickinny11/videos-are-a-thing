@@ -14,23 +14,29 @@ export function StudioCreateView() {
   const [negativePrompt, setNegativePrompt] = useState("");
   const [mediaType, setMediaType] = useState<"image" | "video">("video");
   const [videoMode, setVideoMode] = useState<"i2v" | "t2v">("t2v");
+  const [videoProvider, setVideoProvider] = useState<"runpod" | "fal">("runpod");
   const [duration, setDuration] = useState<5 | 10 | 15>(5);
   const [resolution, setResolution] = useState<"720p" | "1080p">("720p");
   const [imageModel, setImageModel] = useState<string>("flux-schnell");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [audioFile, setAudioFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [flash, setFlash] = useState<string>("");
   const [error, setError] = useState("");
 
   const fileRequired = useMemo(
     () => {
-      if (mediaType === "video") return videoMode === "i2v";
+      if (mediaType === "video") {
+        // fal.ai I2V always needs an image, RunPod I2V needs an image
+        if (videoProvider === "fal") return true;
+        return videoMode === "i2v";
+      }
       // Text-to-image models don't need a file upload
       const textOnlyModels = ["flux-dev", "flux-schnell", "qwen-t2i"];
       if (textOnlyModels.includes(imageModel)) return false;
       return true; // all other image models need input images
     },
-    [mediaType, videoMode, imageModel],
+    [mediaType, videoMode, videoProvider, imageModel],
   );
 
   const submit = async () => {
@@ -54,11 +60,13 @@ export function StudioCreateView() {
       body.set("prompt", prompt.trim());
       if (negativePrompt.trim()) body.set("negativePrompt", negativePrompt.trim());
       body.set("mediaType", mediaType);
-      body.set("videoMode", videoMode);
+      body.set("videoMode", videoProvider === "fal" ? "i2v" : videoMode);
+      body.set("videoProvider", videoProvider);
       body.set("duration", String(duration));
       body.set("resolution", resolution);
       body.set("imageModel", imageModel);
       if (sourceFile) body.set("sourceFile", sourceFile);
+      if (audioFile) body.set("audioFile", audioFile);
 
       const response = await fetch("/api/jobs", {
         method: "POST",
@@ -74,6 +82,7 @@ export function StudioCreateView() {
       setPrompt("");
       setNegativePrompt("");
       setSourceFile(null);
+      setAudioFile(null);
       router.push("/queue");
       router.refresh();
     } catch (err) {
@@ -137,22 +146,49 @@ export function StudioCreateView() {
 
           {mediaType === "video" ? (
             <div className="mt-5 space-y-4">
-              <div className="flex flex-wrap gap-2">
-                {(["t2v", "i2v"] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
-                      videoMode === value
-                        ? "border-cyan-100/80 bg-white/85 text-slate-900 shadow-[0_0_12px_rgba(255,255,255,0.2)]"
-                        : "border-cyan-100/30 bg-white/5 text-cyan-100 hover:bg-white/10 hover:shadow-[0_0_8px_rgba(255,255,255,0.08)]"
-                    }`}
-                    onClick={() => setVideoMode(value)}
-                  >
-                    {value.toUpperCase()}
-                  </button>
-                ))}
+              {/* Provider selector */}
+              <div>
+                <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Provider</label>
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    { value: "runpod" as const, label: "RunPod" },
+                    { value: "fal" as const, label: "Wan 2.6 fal.ai (I2V)" },
+                  ]).map(({ value, label }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
+                        videoProvider === value
+                          ? "border-violet-100/80 bg-violet-200/80 text-slate-900 shadow-[0_0_12px_rgba(167,139,250,0.3)]"
+                          : "border-violet-300/30 bg-violet-400/10 text-violet-100 hover:bg-violet-400/20 hover:shadow-[0_0_8px_rgba(167,139,250,0.12)]"
+                      }`}
+                      onClick={() => setVideoProvider(value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {/* Video mode selector - only show for RunPod */}
+              {videoProvider === "runpod" ? (
+                <div className="flex flex-wrap gap-2">
+                  {(["t2v", "i2v"] as const).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
+                        videoMode === value
+                          ? "border-cyan-100/80 bg-white/85 text-slate-900 shadow-[0_0_12px_rgba(255,255,255,0.2)]"
+                          : "border-cyan-100/30 bg-white/5 text-cyan-100 hover:bg-white/10 hover:shadow-[0_0_8px_rgba(255,255,255,0.08)]"
+                      }`}
+                      onClick={() => setVideoMode(value)}
+                    >
+                      {value.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
 
               <div className="flex flex-wrap gap-2">
                 {[5, 10, 15].map((seconds) => (
@@ -188,13 +224,38 @@ export function StudioCreateView() {
                 ))}
               </div>
 
-              {videoMode === "i2v" ? (
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
-                  onChange={(event) => setSourceFile(event.target.files?.[0] || null)}
-                />
+              {/* fal.ai pricing hint */}
+              {videoProvider === "fal" ? (
+                <p className="text-xs text-violet-300/70">
+                  Pricing: ${resolution === "720p" ? "0.10" : "0.15"}/sec &middot; {duration}s = ${(duration * (resolution === "720p" ? 0.10 : 0.15)).toFixed(2)}
+                </p>
+              ) : null}
+
+              {/* Image upload - show for i2v (RunPod) or fal.ai (always i2v) */}
+              {(videoProvider === "fal" || videoMode === "i2v") ? (
+                <div>
+                  <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Input Image</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
+                    onChange={(event) => setSourceFile(event.target.files?.[0] || null)}
+                  />
+                </div>
+              ) : null}
+
+              {/* Audio upload - fal.ai only, optional */}
+              {videoProvider === "fal" ? (
+                <div>
+                  <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-amber-200/80">Audio (optional)</label>
+                  <input
+                    type="file"
+                    accept="audio/wav,audio/mp3,audio/mpeg,.wav,.mp3"
+                    className="block w-full rounded-2xl border border-amber-200/25 bg-slate-900/70 p-3 text-sm"
+                    onChange={(event) => setAudioFile(event.target.files?.[0] || null)}
+                  />
+                  <p className="mt-1 text-xs text-amber-200/50">WAV or MP3, up to 15 MB. Audio will be trimmed to match video duration.</p>
+                </div>
               ) : null}
             </div>
           ) : (
@@ -276,7 +337,7 @@ export function StudioCreateView() {
           </EffectsErrorBoundary>
         </div>
         <div className="mt-4 space-y-3 text-xs text-cyan-100/75">
-          <p>Video modes: WAN 2.6 T2V + WAN 2.6 I2V</p>
+          <p>Video modes: WAN 2.6 T2V + WAN 2.6 I2V (RunPod) + WAN 2.6 I2V (fal.ai)</p>
           <p>Image modes: Qwen Image Edit + Flux Kontext Dev</p>
           <p>Upload inputs are private signed URLs and outputs are re-hosted to your storage bucket.</p>
         </div>

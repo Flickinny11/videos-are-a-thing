@@ -6,6 +6,7 @@ const RUNPOD_BASE = "https://api.runpod.ai/v2";
 const MODEL_ENDPOINT_BY_MODE: Record<JobMode, string> = {
   "video:t2v": "wan-2-6-t2v",
   "video:i2v": "wan-2-6-i2v",
+  "video:fal-i2v": "wan-v2.6-fal-i2v", // routed through fal.ai, not RunPod
   "image:flux": "black-forest-labs-flux-1-kontext-dev",
   "image:flux-dev": "black-forest-labs-flux-1-dev",
   "image:flux-schnell": "black-forest-labs-flux-1-schnell",
@@ -294,6 +295,9 @@ const runCandidatePayloads = (input: RunpodStartRequest): Array<Record<string, u
         }),
       ];
     }
+    case "video:fal-i2v":
+      // Handled by fal.ai client, not RunPod
+      return [withInputWrapper({ prompt: input.prompt })];
     default:
       return withSafetyDisabled({ prompt: input.prompt, ...neg });
   }

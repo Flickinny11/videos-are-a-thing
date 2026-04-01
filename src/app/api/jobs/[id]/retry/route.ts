@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth";
+import { FalError, falModelName, isFalMode, startFalJob } from "@/lib/fal";
 import {
   createGenerationJob,
   createJobEvent,
@@ -19,7 +20,21 @@ const fail = (message: string, status = 400) =>
     { status },
   );
 
-const normalizeRunpodError = (error: unknown): { message: string; status: number } => {
+const normalizeProviderError = (error: unknown): { message: string; status: number } => {
+  if (error instanceof FalError) {
+    if (error.isBillingError) {
+      return {
+        message:
+          "fal.ai billing error: insufficient credits or limit reached. " +
+          "Please add credits to your fal.ai account and try again — no app restart needed.",
+        status: 402,
+      };
+    }
+    return {
+      message: `fal.ai request failed (HTTP ${error.httpStatus}): ${error.message}`,
+      status: 502,
+    };
+  }
   if (error instanceof RunpodError) {
     if (error.isBillingError) {
       return {
@@ -37,7 +52,7 @@ const normalizeRunpodError = (error: unknown): { message: string; status: number
   }
 
   const text = error instanceof Error ? error.message : "Unknown error";
-  return { message: `RunPod request failed: ${text}`, status: 502 };
+  return { message: `Provider request failed: ${text}`, status: 502 };
 };
 
 export async function POST(
@@ -59,24 +74,48 @@ export async function POST(
         return fail("Input media path does not belong to this user.", 403);
       }
       inputImageUrl = await createSignedInputUrlFromPath(source.input_media_path);
-    } else if (source.mode === "video:i2v" || source.mode === "image:flux" || source.mode === "image:qwen") {
+    } else if (source.mode === "video:i2v" || source.mode === "video:fal-i2v" || source.mode === "image:flux" || source.mode === "image:qwen") {
       return fail("Source input image for this job is missing, cannot retry.", 400);
     }
 
-    let runpodResult;
-    try {
-      runpodResult = await startRunpodJob({
-        mode: source.mode,
-        prompt: source.prompt,
-        durationSeconds: source.duration_seconds || undefined,
-        inputImageUrl,
-      });
-    } catch (error) {
-      const normalized = normalizeRunpodError(error);
-      return fail(normalized.message, normalized.status);
+    let providerJobId: string;
+    let providerStatus: import("@/types/app").JobStatus;
+    let providerRaw: Record<string, unknown>;
+    let model: string;
+
+    if (isFalMode(source.mode)) {
+      try {
+        const falResult = await startFalJob({
+          prompt: source.prompt,
+          imageUrl: inputImageUrl!,
+          duration: String(source.duration_seconds || 5) as "5" | "10" | "15",
+        });
+        providerJobId = falResult.requestId;
+        providerStatus = falResult.status;
+        providerRaw = falResult.raw;
+        model = falModelName;
+      } catch (error) {
+        const normalized = normalizeProviderError(error);
+        return fail(normalized.message, normalized.status);
+      }
+    } else {
+      try {
+        const runpodResult = await startRunpodJob({
+          mode: source.mode,
+          prompt: source.prompt,
+          durationSeconds: source.duration_seconds || undefined,
+          inputImageUrl,
+        });
+        providerJobId = runpodResult.id;
+        providerStatus = runpodResult.status;
+        providerRaw = runpodResult.raw;
+        model = runpodModelNameForMode(source.mode);
+      } catch (error) {
+        const normalized = normalizeProviderError(error);
+        return fail(normalized.message, normalized.status);
+      }
     }
 
-    const model = runpodModelNameForMode(source.mode);
     const newJob = await createGenerationJob({
       userId: user.id,
       mode: source.mode,
@@ -84,17 +123,18 @@ export async function POST(
       prompt: source.prompt,
       durationSeconds: source.duration_seconds,
       inputMediaPath: source.input_media_path,
-      runpodJobId: runpodResult.id,
-      initialStatus: runpodResult.status,
-      runpodRaw: runpodResult.raw,
+      runpodJobId: providerJobId,
+      initialStatus: providerStatus,
+      runpodRaw: providerRaw,
     });
 
+    const providerName = isFalMode(source.mode) ? "fal.ai" : "RunPod";
     await createJobEvent(
       user.id,
       newJob.id,
-      runpodResult.status,
-      `Job retried from ${source.id} and submitted to RunPod with status ${runpodResult.status}.`,
-      runpodResult.raw,
+      providerStatus,
+      `Job retried from ${source.id} and submitted to ${providerName} with status ${providerStatus}.`,
+      providerRaw,
     );
 
     return NextResponse.json({

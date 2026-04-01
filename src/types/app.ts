@@ -3,6 +3,7 @@ export type MediaKind = "image" | "video";
 export type JobMode =
   | "video:t2v"
   | "video:i2v"
+  | "video:fal-i2v"
   | "image:flux"
   | "image:flux-dev"
   | "image:flux-schnell"

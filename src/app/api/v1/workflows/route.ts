@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth";
+import { FalError, falModelName, isFalMode, startFalJob } from "@/lib/fal";
 import {
   createGenerationJob,
   createJobEvent,
@@ -80,7 +81,7 @@ export async function POST(request: Request) {
     if (steps.length > 20) return fail("Maximum 20 steps per workflow.");
 
     const validModes: JobMode[] = [
-      "video:t2v", "video:i2v",
+      "video:t2v", "video:i2v", "video:fal-i2v",
       "image:flux", "image:flux-dev", "image:flux-schnell",
       "image:qwen-t2i", "image:qwen", "image:qwen-2511",
       "image:p-edit", "image:seedream-edit", "image:nano-banana", "image:z-turbo",
@@ -117,16 +118,38 @@ export async function POST(request: Request) {
         const duration = [5, 10, 15].includes(step.duration || 0) ? step.duration! : 5;
         const resolution = step.resolution === "1080p" ? "1080p" : "720p";
 
-        const runpodResult = await startRunpodJob({
-          mode,
-          prompt: step.prompt.trim(),
-          negativePrompt: step.negativePrompt?.trim(),
-          durationSeconds: mode.startsWith("video") ? duration : undefined,
-          resolution: mode.startsWith("video") ? resolution : undefined,
-          inputImageUrl: inputSignedUrl,
-        });
+        let providerJobId: string;
+        let providerStatus: import("@/types/app").JobStatus;
+        let providerRaw: Record<string, unknown>;
+        let model: string;
 
-        const model = runpodModelNameForMode(mode);
+        if (isFalMode(mode)) {
+          const falResult = await startFalJob({
+            prompt: step.prompt.trim(),
+            imageUrl: inputSignedUrl!,
+            resolution,
+            duration: String(duration) as "5" | "10" | "15",
+            negativePrompt: step.negativePrompt?.trim(),
+          });
+          providerJobId = falResult.requestId;
+          providerStatus = falResult.status;
+          providerRaw = falResult.raw;
+          model = falModelName;
+        } else {
+          const runpodResult = await startRunpodJob({
+            mode,
+            prompt: step.prompt.trim(),
+            negativePrompt: step.negativePrompt?.trim(),
+            durationSeconds: mode.startsWith("video") ? duration : undefined,
+            resolution: mode.startsWith("video") ? resolution : undefined,
+            inputImageUrl: inputSignedUrl,
+          });
+          providerJobId = runpodResult.id;
+          providerStatus = runpodResult.status;
+          providerRaw = runpodResult.raw;
+          model = runpodModelNameForMode(mode);
+        }
+
         const jobRow = await createGenerationJob({
           userId: user.id,
           mode,
@@ -134,17 +157,18 @@ export async function POST(request: Request) {
           prompt: step.prompt.trim(),
           durationSeconds: mode.startsWith("video") ? duration : null,
           inputMediaPath: inputPath,
-          runpodJobId: runpodResult.id,
-          initialStatus: runpodResult.status,
-          runpodRaw: runpodResult.raw,
+          runpodJobId: providerJobId,
+          initialStatus: providerStatus,
+          runpodRaw: providerRaw,
         });
 
+        const providerName = isFalMode(mode) ? "fal.ai" : "RunPod";
         await createJobEvent(
           user.id,
           jobRow.id,
-          runpodResult.status,
-          `Workflow step ${index} submitted via programmatic API.`,
-          runpodResult.raw,
+          providerStatus,
+          `Workflow step ${index} submitted to ${providerName} via programmatic API.`,
+          providerRaw,
         );
 
         return mapJobRowToResponse(jobRow);
@@ -158,7 +182,11 @@ export async function POST(request: Request) {
 
       const error = result.reason;
       let message = "Unknown error";
-      if (error instanceof RunpodError) {
+      if (error instanceof FalError) {
+        message = error.isBillingError
+          ? "fal.ai billing error: insufficient credits. Add credits and try again."
+          : `fal.ai failed (HTTP ${error.httpStatus}): ${error.message}`;
+      } else if (error instanceof RunpodError) {
         message = error.isBillingError
           ? "RunPod billing error: insufficient credits."
           : `RunPod failed (HTTP ${error.httpStatus}): ${error.message}`;
