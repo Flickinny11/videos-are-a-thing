@@ -1,6 +1,16 @@
 import { envServer } from "@/lib/env/server";
 import type { JobStatus } from "@/types/app";
 
+/**
+ * fal.ai Queue API client for Wan v2.6 Image-to-Video.
+ *
+ * Queue endpoints (per https://fal.ai/docs/model-apis/model-endpoints/queue):
+ *   POST   https://queue.fal.run/{model-id}                          → submit
+ *   GET    https://queue.fal.run/{model-id}/requests/{id}/status     → poll
+ *   GET    https://queue.fal.run/{model-id}/requests/{id}            → result
+ *   PUT    https://queue.fal.run/{model-id}/requests/{id}/cancel     → cancel
+ */
+
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 const FAL_MODEL_ID = "wan/v2.6/image-to-video";
 
@@ -65,13 +75,15 @@ export class FalError extends Error {
   }
 }
 
-const falHeaders = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Key ${envServer.falKey}`,
-});
+const falAuthHeader = () => `Key ${envServer.falKey}`;
 
 /**
  * Submit a Wan 2.6 image-to-video job to the fal.ai queue.
+ *
+ * POST https://queue.fal.run/wan/v2.6/image-to-video
+ * Authorization: Key $FAL_KEY
+ *
+ * Response: { request_id, response_url, status_url, cancel_url }
  */
 export const startFalJob = async (input: FalStartRequest): Promise<FalRunResponse> => {
   if (!envServer.falKey) {
@@ -97,7 +109,10 @@ export const startFalJob = async (input: FalStartRequest): Promise<FalRunRespons
 
   const response = await fetch(`${FAL_QUEUE_BASE}/${FAL_MODEL_ID}`, {
     method: "POST",
-    headers: falHeaders(),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: falAuthHeader(),
+    },
     body: JSON.stringify(payload),
     cache: "no-store",
   });
@@ -141,18 +156,27 @@ const mapFalStatus = (status: string): JobStatus => {
 };
 
 /**
- * Poll the fal.ai queue for job status.
+ * Poll the fal.ai queue for job status, and fetch the result when completed.
+ *
+ * Step 1: GET .../requests/{id}/status?logs=1
+ *   → { status: "IN_QUEUE"|"IN_PROGRESS"|"COMPLETED", queue_position, logs, metrics }
+ *
+ * Step 2 (only when COMPLETED): GET .../requests/{id}
+ *   → { video: { url, content_type }, seed, actual_prompt }
  */
 export const getFalJobStatus = async (requestId: string): Promise<FalStatusResponse> => {
   if (!envServer.falKey) {
     throw new FalError({ error: "FAL_KEY is not configured." }, 401);
   }
 
-  // First check queue status
+  const authHeader = falAuthHeader();
+
+  // Step 1: GET queue status with logs
   const statusResponse = await fetch(
-    `${FAL_QUEUE_BASE}/${FAL_MODEL_ID}/requests/${requestId}/status`,
+    `${FAL_QUEUE_BASE}/${FAL_MODEL_ID}/requests/${requestId}/status?logs=1`,
     {
-      headers: { Authorization: `Key ${envServer.falKey}` },
+      method: "GET",
+      headers: { Authorization: authHeader },
       cache: "no-store",
     },
   );
@@ -173,32 +197,40 @@ export const getFalJobStatus = async (requestId: string): Promise<FalStatusRespo
 
   // Extract progress from queue position or logs
   let progress: number | null = null;
-  if (typeof statusBody.queue_position === "number") {
-    // Rough estimate: closer to front = higher progress
-    progress = statusBody.queue_position === 0 ? 10 : 5;
+  if (mappedStatus === "IN_QUEUE") {
+    const queuePos = typeof statusBody.queue_position === "number" ? statusBody.queue_position : null;
+    progress = queuePos !== null ? Math.max(1, 10 - queuePos) : 5;
   }
   if (mappedStatus === "IN_PROGRESS") {
-    // Logs may contain progress info
+    // Parse progress from log messages if available
     const logs = statusBody.logs as Array<{ message?: string }> | undefined;
     if (Array.isArray(logs) && logs.length > 0) {
-      const lastLog = logs[logs.length - 1];
-      const msg = typeof lastLog?.message === "string" ? lastLog.message : "";
-      const match = msg.match(/(\d+)%/);
-      if (match) {
-        progress = parseInt(match[1], 10);
-      } else {
-        // If we're in progress, show at least some progress
-        progress = Math.min(50, (logs.length / 20) * 100);
+      // Walk logs in reverse to find latest percentage
+      for (let i = logs.length - 1; i >= 0; i--) {
+        const logMsg = logs[i]?.message;
+        const msg = typeof logMsg === "string" ? logMsg : "";
+        const match = msg.match(/(\d+)%/);
+        if (match) {
+          progress = parseInt(match[1], 10);
+          break;
+        }
       }
+      if (progress === null) {
+        // In progress but no percentage in logs; estimate from log count
+        progress = Math.min(80, Math.round((logs.length / 30) * 100));
+      }
+    } else {
+      progress = 15; // In progress, no logs yet
     }
   }
 
-  // If completed, fetch the actual result
+  // Step 2: If COMPLETED, fetch the actual result
   if (mappedStatus === "COMPLETED") {
     const resultResponse = await fetch(
       `${FAL_QUEUE_BASE}/${FAL_MODEL_ID}/requests/${requestId}`,
       {
-        headers: { Authorization: `Key ${envServer.falKey}` },
+        method: "GET",
+        headers: { Authorization: authHeader },
         cache: "no-store",
       },
     );
@@ -214,7 +246,7 @@ export const getFalJobStatus = async (requestId: string): Promise<FalStatusRespo
       throw new FalError(resultBody, resultResponse.status);
     }
 
-    // Extract video URL from response
+    // Per API output schema: { video: { url, content_type }, seed, actual_prompt }
     const video = resultBody.video as Record<string, unknown> | undefined;
     const videoUrl = typeof video?.url === "string" ? video.url : null;
     const seed = typeof resultBody.seed === "number" ? resultBody.seed : null;

@@ -212,7 +212,7 @@ export const persistRemoteMediaToStorage = async (input: {
 }) => {
   const response = await fetch(input.remoteUrl, { cache: "no-store" });
   if (!response.ok) {
-    throw new Error(`Failed to download generated media from RunPod (${response.status}).`);
+    throw new Error(`Failed to download generated media (${response.status}).`);
   }
 
   const arrayBuffer = await response.arrayBuffer();
