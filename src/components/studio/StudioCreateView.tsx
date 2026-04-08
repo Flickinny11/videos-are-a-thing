@@ -8,14 +8,16 @@ import { OglLiquidRibbon } from "@/components/effects/OglLiquidRibbon";
 import { PostFxHalo } from "@/components/effects/PostFxHalo";
 import { RapierFloatField } from "@/components/effects/RapierFloatField";
 
+type VideoProvider = "runpod" | "fal" | "fal-i2v-2.7" | "fal-r2v-2.7";
+
 export function StudioCreateView() {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [mediaType, setMediaType] = useState<"image" | "video">("video");
   const [videoMode, setVideoMode] = useState<"i2v" | "t2v">("t2v");
-  const [videoProvider, setVideoProvider] = useState<"runpod" | "fal">("runpod");
-  const [duration, setDuration] = useState<5 | 10 | 15>(5);
+  const [videoProvider, setVideoProvider] = useState<VideoProvider>("runpod");
+  const [duration, setDuration] = useState<number>(5);
   const [resolution, setResolution] = useState<"720p" | "1080p">("720p");
   const [imageModel, setImageModel] = useState<string>("flux-schnell");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
@@ -24,20 +26,38 @@ export function StudioCreateView() {
   const [flash, setFlash] = useState<string>("");
   const [error, setError] = useState("");
 
+  // Wan 2.7 I2V extras
+  const [endImageFile, setEndImageFile] = useState<File | null>(null);
+  const [enablePromptExpansion, setEnablePromptExpansion] = useState(true);
+
+  // Wan 2.7 R2V extras
+  const [referenceImages, setReferenceImages] = useState<File[]>([]);
+  const [referenceVideos, setReferenceVideos] = useState<File[]>([]);
+  const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16" | "1:1" | "4:3" | "3:4">("16:9");
+  const [multiShots, setMultiShots] = useState(false);
+
+  const isFalProvider = videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7";
+
   const fileRequired = useMemo(
     () => {
       if (mediaType === "video") {
-        // fal.ai I2V always needs an image, RunPod I2V needs an image
+        if (videoProvider === "fal-r2v-2.7") return false; // uses referenceImages instead
+        if (videoProvider === "fal-i2v-2.7") return false; // image is optional for 2.7 I2V
         if (videoProvider === "fal") return true;
         return videoMode === "i2v";
       }
-      // Text-to-image models don't need a file upload
       const textOnlyModels = ["flux-dev", "flux-schnell", "qwen-t2i"];
       if (textOnlyModels.includes(imageModel)) return false;
-      return true; // all other image models need input images
+      return true;
     },
     [mediaType, videoMode, videoProvider, imageModel],
   );
+
+  const durationOptions = useMemo(() => {
+    if (videoProvider === "fal-r2v-2.7") return [2, 3, 4, 5, 6, 7, 8, 9, 10];
+    if (videoProvider === "fal-i2v-2.7") return [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    return [5, 10, 15];
+  }, [videoProvider]);
 
   const submit = async () => {
     setError("");
@@ -68,6 +88,20 @@ export function StudioCreateView() {
       if (sourceFile) body.set("sourceFile", sourceFile);
       if (audioFile) body.set("audioFile", audioFile);
 
+      // Wan 2.7 I2V extras
+      if (videoProvider === "fal-i2v-2.7") {
+        if (endImageFile) body.set("endImageFile", endImageFile);
+        body.set("enablePromptExpansion", String(enablePromptExpansion));
+      }
+
+      // Wan 2.7 R2V extras
+      if (videoProvider === "fal-r2v-2.7") {
+        body.set("aspectRatio", aspectRatio);
+        body.set("multiShots", String(multiShots));
+        referenceImages.forEach((file, i) => body.append(`referenceImage_${i}`, file));
+        referenceVideos.forEach((file, i) => body.append(`referenceVideo_${i}`, file));
+      }
+
       const response = await fetch("/api/jobs", {
         method: "POST",
         body,
@@ -83,6 +117,9 @@ export function StudioCreateView() {
       setNegativePrompt("");
       setSourceFile(null);
       setAudioFile(null);
+      setEndImageFile(null);
+      setReferenceImages([]);
+      setReferenceVideos([]);
       router.push("/queue");
       router.refresh();
     } catch (err) {
@@ -91,6 +128,32 @@ export function StudioCreateView() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const providerOptions: { value: VideoProvider; label: string }[] = [
+    { value: "runpod", label: "RunPod" },
+    { value: "fal", label: "Wan 2.6 fal.ai (I2V)" },
+    { value: "fal-i2v-2.7", label: "Wan 2.7 fal.ai (I2V)" },
+    { value: "fal-r2v-2.7", label: "Wan 2.7 fal.ai (R2V)" },
+  ];
+
+  // Button style helper
+  const pill = (active: boolean, color: "cyan" | "violet" | "white" | "amber" = "cyan") => {
+    const activeStyles: Record<string, string> = {
+      cyan: "border-cyan-100/80 bg-cyan-200/80 text-slate-900 shadow-[0_0_12px_rgba(34,211,238,0.3)]",
+      violet: "border-violet-100/80 bg-violet-200/80 text-slate-900 shadow-[0_0_12px_rgba(167,139,250,0.3)]",
+      white: "border-cyan-100/80 bg-white/85 text-slate-900 shadow-[0_0_12px_rgba(255,255,255,0.2)]",
+      amber: "border-amber-100/80 bg-amber-200/80 text-slate-900 shadow-[0_0_12px_rgba(251,191,36,0.3)]",
+    };
+    const inactiveStyles: Record<string, string> = {
+      cyan: "border-cyan-300/30 bg-cyan-400/10 text-cyan-50 hover:bg-cyan-400/20 hover:shadow-[0_0_8px_rgba(34,211,238,0.12)]",
+      violet: "border-violet-300/30 bg-violet-400/10 text-violet-100 hover:bg-violet-400/20 hover:shadow-[0_0_8px_rgba(167,139,250,0.12)]",
+      white: "border-cyan-100/30 bg-white/5 text-cyan-100 hover:bg-white/10 hover:shadow-[0_0_8px_rgba(255,255,255,0.08)]",
+      amber: "border-amber-300/30 bg-amber-400/10 text-amber-100 hover:bg-amber-400/20 hover:shadow-[0_0_8px_rgba(251,191,36,0.12)]",
+    };
+    return `rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
+      active ? activeStyles[color] : inactiveStyles[color]
+    }`;
   };
 
   return (
@@ -133,11 +196,7 @@ export function StudioCreateView() {
                 key={value}
                 type="button"
                 onClick={() => setMediaType(value)}
-                className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
-                  mediaType === value
-                    ? "border-cyan-100/80 bg-cyan-200/80 text-slate-900 shadow-[0_0_12px_rgba(34,211,238,0.3)]"
-                    : "border-cyan-300/30 bg-cyan-400/10 text-cyan-50 hover:bg-cyan-400/20 hover:shadow-[0_0_8px_rgba(34,211,238,0.12)]"
-                }`}
+                className={pill(mediaType === value)}
               >
                 {value}
               </button>
@@ -150,19 +209,16 @@ export function StudioCreateView() {
               <div>
                 <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Provider</label>
                 <div className="flex flex-wrap gap-2">
-                  {([
-                    { value: "runpod" as const, label: "RunPod" },
-                    { value: "fal" as const, label: "Wan 2.6 fal.ai (I2V)" },
-                  ]).map(({ value, label }) => (
+                  {providerOptions.map(({ value, label }) => (
                     <button
                       key={value}
                       type="button"
-                      className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
-                        videoProvider === value
-                          ? "border-violet-100/80 bg-violet-200/80 text-slate-900 shadow-[0_0_12px_rgba(167,139,250,0.3)]"
-                          : "border-violet-300/30 bg-violet-400/10 text-violet-100 hover:bg-violet-400/20 hover:shadow-[0_0_8px_rgba(167,139,250,0.12)]"
-                      }`}
-                      onClick={() => setVideoProvider(value)}
+                      className={pill(videoProvider === value, "violet")}
+                      onClick={() => {
+                        setVideoProvider(value);
+                        // Reset duration to valid default when switching providers
+                        if (value === "fal-r2v-2.7" && duration > 10) setDuration(5);
+                      }}
                     >
                       {label}
                     </button>
@@ -177,11 +233,7 @@ export function StudioCreateView() {
                     <button
                       key={value}
                       type="button"
-                      className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
-                        videoMode === value
-                          ? "border-cyan-100/80 bg-white/85 text-slate-900 shadow-[0_0_12px_rgba(255,255,255,0.2)]"
-                          : "border-cyan-100/30 bg-white/5 text-cyan-100 hover:bg-white/10 hover:shadow-[0_0_8px_rgba(255,255,255,0.08)]"
-                      }`}
+                      className={pill(videoMode === value, "white")}
                       onClick={() => setVideoMode(value)}
                     >
                       {value.toUpperCase()}
@@ -190,51 +242,100 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              <div className="flex flex-wrap gap-2">
-                {[5, 10, 15].map((seconds) => (
-                  <button
-                    key={seconds}
-                    type="button"
-                    className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
-                      duration === seconds
-                        ? "border-cyan-100/80 bg-cyan-100 text-slate-900 shadow-[0_0_12px_rgba(34,211,238,0.3)]"
-                        : "border-cyan-100/30 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/20 hover:shadow-[0_0_8px_rgba(34,211,238,0.12)]"
-                    }`}
-                    onClick={() => setDuration(seconds as 5 | 10 | 15)}
-                  >
-                    {seconds}s
-                  </button>
-                ))}
+              {/* Duration selector */}
+              <div>
+                <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Duration</label>
+                <div className="flex flex-wrap gap-2">
+                  {durationOptions.map((seconds) => (
+                    <button
+                      key={seconds}
+                      type="button"
+                      className={pill(duration === seconds)}
+                      onClick={() => setDuration(seconds)}
+                    >
+                      {seconds}s
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                {(["720p", "1080p"] as const).map((res) => (
-                  <button
-                    key={res}
-                    type="button"
-                    className={`rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
-                      resolution === res
-                        ? "border-cyan-100/80 bg-cyan-100 text-slate-900 shadow-[0_0_12px_rgba(34,211,238,0.3)]"
-                        : "border-cyan-100/30 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/20 hover:shadow-[0_0_8px_rgba(34,211,238,0.12)]"
-                    }`}
-                    onClick={() => setResolution(res)}
-                  >
-                    {res}
-                  </button>
-                ))}
+              {/* Resolution selector */}
+              <div>
+                <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Resolution</label>
+                <div className="flex flex-wrap gap-2">
+                  {(["720p", "1080p"] as const).map((res) => (
+                    <button
+                      key={res}
+                      type="button"
+                      className={pill(resolution === res)}
+                      onClick={() => setResolution(res)}
+                    >
+                      {res}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {/* Aspect Ratio - R2V only */}
+              {videoProvider === "fal-r2v-2.7" ? (
+                <div>
+                  <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Aspect Ratio</label>
+                  <div className="flex flex-wrap gap-2">
+                    {(["16:9", "9:16", "1:1", "4:3", "3:4"] as const).map((ar) => (
+                      <button
+                        key={ar}
+                        type="button"
+                        className={pill(aspectRatio === ar)}
+                        onClick={() => setAspectRatio(ar)}
+                      >
+                        {ar}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Multi-shots toggle - R2V only */}
+              {videoProvider === "fal-r2v-2.7" ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className={pill(multiShots, "amber")}
+                    onClick={() => setMultiShots(!multiShots)}
+                  >
+                    Multi-shots: {multiShots ? "ON" : "OFF"}
+                  </button>
+                  <span className="text-xs text-cyan-100/60">Enable intelligent multi-shot segmentation</span>
+                </div>
+              ) : null}
+
+              {/* Prompt expansion toggle - I2V 2.7 only */}
+              {videoProvider === "fal-i2v-2.7" ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className={pill(enablePromptExpansion, "amber")}
+                    onClick={() => setEnablePromptExpansion(!enablePromptExpansion)}
+                  >
+                    Prompt Expansion: {enablePromptExpansion ? "ON" : "OFF"}
+                  </button>
+                  <span className="text-xs text-cyan-100/60">Intelligent prompt rewriting</span>
+                </div>
+              ) : null}
 
               {/* fal.ai pricing hint */}
-              {videoProvider === "fal" ? (
+              {isFalProvider ? (
                 <p className="text-xs text-violet-300/70">
-                  Pricing: ${resolution === "720p" ? "0.10" : "0.15"}/sec &middot; {duration}s = ${(duration * (resolution === "720p" ? 0.10 : 0.15)).toFixed(2)}
+                  fal.ai &middot; $0.10/sec &middot; {duration}s = ${(duration * 0.10).toFixed(2)} &middot; Safety filter disabled
                 </p>
               ) : null}
 
-              {/* Image upload - show for i2v (RunPod) or fal.ai (always i2v) */}
-              {(videoProvider === "fal" || videoMode === "i2v") ? (
+              {/* Image upload for I2V modes */}
+              {(videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoMode === "i2v") && videoProvider !== "fal-r2v-2.7" ? (
                 <div>
-                  <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Input Image</label>
+                  <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">
+                    Input Image {videoProvider === "fal-i2v-2.7" ? "(optional start frame)" : ""}
+                  </label>
                   <input
                     type="file"
                     accept="image/*"
@@ -244,8 +345,22 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              {/* Audio upload - fal.ai only, optional */}
-              {videoProvider === "fal" ? (
+              {/* End image upload - I2V 2.7 only */}
+              {videoProvider === "fal-i2v-2.7" ? (
+                <div>
+                  <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">End Frame Image (optional)</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
+                    onChange={(event) => setEndImageFile(event.target.files?.[0] || null)}
+                  />
+                  <p className="mt-1 text-xs text-cyan-200/50">First-and-last-frame-to-video: provide both start and end images.</p>
+                </div>
+              ) : null}
+
+              {/* Audio upload - fal.ai I2V modes */}
+              {(videoProvider === "fal" || videoProvider === "fal-i2v-2.7") ? (
                 <div>
                   <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-amber-200/80">Audio (optional)</label>
                   <input
@@ -254,8 +369,55 @@ export function StudioCreateView() {
                     className="block w-full rounded-2xl border border-amber-200/25 bg-slate-900/70 p-3 text-sm"
                     onChange={(event) => setAudioFile(event.target.files?.[0] || null)}
                   />
-                  <p className="mt-1 text-xs text-amber-200/50">WAV or MP3, up to 15 MB. Audio will be trimmed to match video duration.</p>
+                  <p className="mt-1 text-xs text-amber-200/50">
+                    WAV or MP3, up to 15 MB. {videoProvider === "fal-i2v-2.7" ? "Duration: 2-30s." : "Audio will be trimmed to match video duration."}
+                  </p>
                 </div>
+              ) : null}
+
+              {/* Reference images - R2V only (multiple) */}
+              {videoProvider === "fal-r2v-2.7" ? (
+                <>
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Reference Images (optional, multiple)</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
+                      onChange={(event) => {
+                        const files = event.target.files;
+                        if (files) setReferenceImages(Array.from(files));
+                      }}
+                    />
+                    <p className="mt-1 text-xs text-cyan-200/50">
+                      Upload one or more reference images for character/object appearance. Max 20 MB each.
+                    </p>
+                    {referenceImages.length > 0 ? (
+                      <p className="mt-1 text-xs text-emerald-300/70">{referenceImages.length} image(s) selected</p>
+                    ) : null}
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-violet-200/80">Reference Videos (optional, multiple)</label>
+                    <input
+                      type="file"
+                      accept="video/*"
+                      multiple
+                      className="block w-full rounded-2xl border border-violet-200/25 bg-slate-900/70 p-3 text-sm"
+                      onChange={(event) => {
+                        const files = event.target.files;
+                        if (files) setReferenceVideos(Array.from(files));
+                      }}
+                    />
+                    <p className="mt-1 text-xs text-violet-200/50">
+                      Upload reference videos for motion/appearance. Max 100 MB each.
+                    </p>
+                    {referenceVideos.length > 0 ? (
+                      <p className="mt-1 text-xs text-emerald-300/70">{referenceVideos.length} video(s) selected</p>
+                    ) : null}
+                  </div>
+                </>
               ) : null}
             </div>
           ) : (
@@ -337,7 +499,7 @@ export function StudioCreateView() {
           </EffectsErrorBoundary>
         </div>
         <div className="mt-4 space-y-3 text-xs text-cyan-100/75">
-          <p>Video modes: WAN 2.6 T2V + WAN 2.6 I2V (RunPod) + WAN 2.6 I2V (fal.ai)</p>
+          <p>Video modes: WAN 2.6 T2V + WAN 2.6 I2V (RunPod) + WAN 2.6 I2V (fal.ai) + WAN 2.7 I2V (fal.ai) + WAN 2.7 R2V (fal.ai)</p>
           <p>Image modes: Qwen Image Edit + Flux Kontext Dev</p>
           <p>Upload inputs are private signed URLs and outputs are re-hosted to your storage bucket.</p>
         </div>

@@ -4,6 +4,8 @@ export type JobMode =
   | "video:t2v"
   | "video:i2v"
   | "video:fal-i2v"
+  | "video:fal-i2v-2.7"
+  | "video:fal-r2v-2.7"
   | "image:flux"
   | "image:flux-dev"
   | "image:flux-schnell"

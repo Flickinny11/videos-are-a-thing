@@ -103,6 +103,7 @@ export async function POST(request: Request) {
 
     const validModes: JobMode[] = [
       "video:t2v", "video:i2v", "video:fal-i2v",
+      "video:fal-i2v-2.7", "video:fal-r2v-2.7",
       "image:flux", "image:flux-dev", "image:flux-schnell",
       "image:qwen-t2i", "image:qwen", "image:qwen-2511",
       "image:p-edit", "image:seedream-edit", "image:nano-banana", "image:z-turbo",
@@ -112,10 +113,10 @@ export async function POST(request: Request) {
     }
 
     const mode = service as JobMode;
-    duration = [5, 10, 15].includes(duration) ? duration : 5;
+    duration = duration >= 2 && duration <= 15 ? duration : 5;
     if (!["720p", "1080p"].includes(resolution)) resolution = "720p";
 
-    const textOnlyModes: JobMode[] = ["video:t2v", "image:flux-dev", "image:flux-schnell", "image:qwen-t2i"];
+    const textOnlyModes: JobMode[] = ["video:t2v", "video:fal-r2v-2.7", "video:fal-i2v-2.7", "image:flux-dev", "image:flux-schnell", "image:qwen-t2i"];
     const fileRequired = !textOnlyModes.includes(mode);
     let inputPath: string | null = null;
     let inputSignedUrl: string | undefined;
@@ -124,6 +125,10 @@ export async function POST(request: Request) {
       if (!sourceFile) {
         return fail("sourceFile is required for this service. Use multipart/form-data to upload.");
       }
+      const upload = await saveUploadedInput({ userId: user.id, file: sourceFile });
+      inputPath = upload.path;
+      inputSignedUrl = upload.signedUrl;
+    } else if (sourceFile) {
       const upload = await saveUploadedInput({ userId: user.id, file: sourceFile });
       inputPath = upload.path;
       inputSignedUrl = upload.signedUrl;
@@ -137,16 +142,17 @@ export async function POST(request: Request) {
     if (isFalMode(mode)) {
       try {
         const falResult = await startFalJob({
+          mode,
           prompt,
-          imageUrl: inputSignedUrl!,
+          imageUrl: inputSignedUrl,
           resolution,
-          duration: String(duration) as "5" | "10" | "15",
+          duration: String(duration),
           negativePrompt,
         });
         providerJobId = falResult.requestId;
         providerStatus = falResult.status;
         providerRaw = falResult.raw;
-        model = falModelName;
+        model = falModelName(mode);
       } catch (error) {
         const normalized = normalizeProviderError(error);
         return fail(normalized.message, normalized.status);

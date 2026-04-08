@@ -88,7 +88,7 @@ export async function POST(request: Request) {
     if (!prompt) return fail("Prompt is required.");
     if (!["image", "video"].includes(mediaType)) return fail("mediaType must be image or video.");
 
-    const duration = [5, 10, 15].includes(durationRaw) ? durationRaw : 5;
+    const duration = durationRaw >= 2 && durationRaw <= 15 ? durationRaw : 5;
     const resolution = (["720p", "1080p"] as const).includes(resolutionRaw as "720p" | "1080p")
       ? (resolutionRaw as "720p" | "1080p")
       : "720p";
@@ -98,8 +98,12 @@ export async function POST(request: Request) {
 
     let mode: JobMode;
     if (mediaType === "video") {
-      if (videoMode === "i2v" && videoProvider === "fal") {
+      if (videoProvider === "fal") {
         mode = "video:fal-i2v";
+      } else if (videoProvider === "fal-i2v-2.7") {
+        mode = "video:fal-i2v-2.7";
+      } else if (videoProvider === "fal-r2v-2.7") {
+        mode = "video:fal-r2v-2.7";
       } else {
         mode = videoMode === "i2v" ? "video:i2v" : "video:t2v";
       }
@@ -119,7 +123,8 @@ export async function POST(request: Request) {
       mode = imageModelMap[imageModel] || "image:flux-schnell";
     }
 
-    const textOnlyModes: JobMode[] = ["video:t2v", "image:flux-dev", "image:flux-schnell", "image:qwen-t2i"];
+    // R2V uses referenceImage fields; I2V 2.7 image is optional; T2V is text-only
+    const textOnlyModes: JobMode[] = ["video:t2v", "video:fal-r2v-2.7", "video:fal-i2v-2.7", "image:flux-dev", "image:flux-schnell", "image:qwen-t2i"];
     const fileRequired = !textOnlyModes.includes(mode);
     let inputPath: string | null = null;
     let inputSignedUrl: string | undefined;
@@ -132,11 +137,16 @@ export async function POST(request: Request) {
       const upload = await saveUploadedInput({ userId: user.id, file: sourceFile });
       inputPath = upload.path;
       inputSignedUrl = upload.signedUrl;
+    } else if (sourceFile instanceof File && sourceFile.size > 0) {
+      // Optional file upload (e.g. I2V 2.7 start frame)
+      const upload = await saveUploadedInput({ userId: user.id, file: sourceFile });
+      inputPath = upload.path;
+      inputSignedUrl = upload.signedUrl;
     }
 
-    // Handle optional audio upload for fal.ai
+    // Handle optional audio upload for fal.ai I2V modes
     let audioSignedUrl: string | undefined;
-    if (isFalMode(mode) && audioFile instanceof File && audioFile.size > 0) {
+    if ((mode === "video:fal-i2v" || mode === "video:fal-i2v-2.7") && audioFile instanceof File && audioFile.size > 0) {
       const audioUpload = await saveUploadedInput({ userId: user.id, file: audioFile });
       audioSignedUrl = audioUpload.signedUrl;
     }
@@ -146,20 +156,63 @@ export async function POST(request: Request) {
     let providerRaw: Record<string, unknown>;
     let model: string;
 
+    // Handle additional uploads for Wan 2.7 models
+    const referenceImageUrls: string[] = [];
+    const referenceVideoUrls: string[] = [];
+    let endImageSignedUrl: string | undefined;
+
+    if (mode === "video:fal-r2v-2.7") {
+      // Collect multiple reference images
+      for (const [key, value] of formData.entries()) {
+        if (key.startsWith("referenceImage") && value instanceof File && value.size > 0) {
+          const upload = await saveUploadedInput({ userId: user.id, file: value });
+          referenceImageUrls.push(upload.signedUrl);
+        }
+        if (key.startsWith("referenceVideo") && value instanceof File && value.size > 0) {
+          const upload = await saveUploadedInput({ userId: user.id, file: value });
+          referenceVideoUrls.push(upload.signedUrl);
+        }
+      }
+    }
+
+    if (mode === "video:fal-i2v-2.7") {
+      const endImageFile = formData.get("endImageFile");
+      if (endImageFile instanceof File && endImageFile.size > 0) {
+        const upload = await saveUploadedInput({ userId: user.id, file: endImageFile });
+        endImageSignedUrl = upload.signedUrl;
+      }
+    }
+
+    const aspectRatioRaw = String(formData.get("aspectRatio") || "16:9").trim();
+    const aspectRatio = (["16:9", "9:16", "1:1", "4:3", "3:4"] as const).includes(
+      aspectRatioRaw as "16:9"
+    )
+      ? (aspectRatioRaw as "16:9" | "9:16" | "1:1" | "4:3" | "3:4")
+      : "16:9";
+    const multiShots = formData.get("multiShots") === "true";
+    const enablePromptExpansion = formData.get("enablePromptExpansion") !== "false";
+
     if (isFalMode(mode)) {
       try {
         const falResult = await startFalJob({
+          mode,
           prompt,
-          imageUrl: inputSignedUrl!,
+          imageUrl: inputSignedUrl,
           audioUrl: audioSignedUrl,
+          endImageUrl: endImageSignedUrl,
           resolution,
-          duration: String(duration) as "5" | "10" | "15",
+          duration: String(duration),
           negativePrompt,
+          referenceImageUrls: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
+          referenceVideoUrls: referenceVideoUrls.length > 0 ? referenceVideoUrls : undefined,
+          aspectRatio,
+          multiShots,
+          enablePromptExpansion,
         });
         providerJobId = falResult.requestId;
         providerStatus = falResult.status;
         providerRaw = falResult.raw;
-        model = falModelName;
+        model = falModelName(mode);
       } catch (error) {
         const normalized = normalizeProviderError(error);
         return fail(normalized.message, normalized.status);

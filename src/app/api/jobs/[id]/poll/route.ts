@@ -92,7 +92,7 @@ export async function POST(
       // ── fal.ai polling ──
       let falStatus;
       try {
-        falStatus = await getFalJobStatus(current.runpod_job_id);
+        falStatus = await getFalJobStatus(current.mode, current.runpod_job_id);
       } catch (error) {
         const parsed = parsePollError(error);
 

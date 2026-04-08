@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth";
+import { getFalJobStatus, isFalMode } from "@/lib/fal";
 import {
   createJobEvent,
   createMediaAsset,
@@ -16,7 +17,7 @@ const TERMINAL = new Set(["COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"]);
 /**
  * POST /api/v1/jobs/:id/status
  *
- * Poll a job's status from RunPod and update the local record.
+ * Poll a job's status from the provider (RunPod or fal.ai) and update the local record.
  * If the job is COMPLETED and output hasn't been ingested yet,
  * it downloads the media and saves it to storage.
  *
@@ -38,89 +39,179 @@ export async function POST(
       });
     }
 
-    let runpod;
-    try {
-      runpod = await getRunpodJobStatus(current.mode, current.runpod_job_id);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Polling failed.";
-      return NextResponse.json(
-        { success: false, message },
-        { status: 502 },
-      );
-    }
+    let updated;
 
-    let updated = await updateJobStatus({
-      jobId: current.id,
-      status: runpod.status,
-      progressPercent: runpod.progressPercent,
-      delayTimeMs: runpod.delayTime,
-      executionTimeMs: runpod.executionTime,
-      errorReason: runpod.error,
-      runpodRaw: runpod.raw,
-    });
+    if (isFalMode(current.mode)) {
+      // ── fal.ai polling ──
+      let falStatus;
+      try {
+        falStatus = await getFalJobStatus(current.mode, current.runpod_job_id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Polling failed.";
+        return NextResponse.json(
+          { success: false, message },
+          { status: 502 },
+        );
+      }
 
-    if (updated.status !== current.status) {
-      await createJobEvent(
-        user.id,
-        current.id,
-        updated.status,
-        runpod.error || `RunPod status updated to ${updated.status}.`,
-        runpod.raw,
-      );
-    }
+      updated = await updateJobStatus({
+        jobId: current.id,
+        status: falStatus.status,
+        progressPercent: falStatus.progress,
+        delayTimeMs: current.delay_time_ms,
+        executionTimeMs: current.execution_time_ms,
+        errorReason: falStatus.error,
+        runpodRaw: falStatus.raw,
+      });
 
-    if (updated.status === "COMPLETED" && !updated.output_media_id) {
-      const kind = updated.mode.startsWith("video") ? "video" : "image";
-      const url = extractMediaUrlFromOutput(runpod.output, kind);
+      if (updated.status !== current.status) {
+        await createJobEvent(
+          user.id, current.id, updated.status,
+          falStatus.error || `fal.ai status updated to ${updated.status}.`,
+          falStatus.raw,
+        );
+      }
 
-      if (!url) {
-        updated = await updateJobStatus({
-          jobId: current.id,
-          status: "FAILED",
-          progressPercent: null,
-          delayTimeMs: runpod.delayTime,
-          executionTimeMs: runpod.executionTime,
-          errorReason: "RunPod completed but no downloadable media URL was found.",
-          runpodRaw: runpod.raw,
-        });
-      } else {
-        const persisted = await persistRemoteMediaToStorage({
-          userId: user.id,
-          jobId: current.id,
-          remoteUrl: url,
-          kind,
-        });
+      if (updated.status === "COMPLETED" && !updated.output_media_id) {
+        const videoUrl = falStatus.videoUrl;
+        if (!videoUrl) {
+          updated = await updateJobStatus({
+            jobId: current.id,
+            status: "FAILED",
+            progressPercent: null,
+            delayTimeMs: current.delay_time_ms,
+            executionTimeMs: current.execution_time_ms,
+            errorReason: "fal.ai completed but no downloadable video URL was found.",
+            runpodRaw: falStatus.raw,
+          });
+        } else {
+          const persisted = await persistRemoteMediaToStorage({
+            userId: user.id,
+            jobId: current.id,
+            remoteUrl: videoUrl,
+            kind: "video",
+          });
 
-        const media = await createMediaAsset({
-          userId: user.id,
-          jobId: current.id,
-          kind,
-          storagePath: persisted.path,
-          mimeType: persisted.mimeType,
-          sizeBytes: persisted.sizeBytes,
-          prompt: updated.prompt,
-          model: updated.model,
-          meta: { sourceUrl: url, runpodJobId: updated.runpod_job_id },
-        });
+          const media = await createMediaAsset({
+            userId: user.id,
+            jobId: current.id,
+            kind: "video",
+            storagePath: persisted.path,
+            mimeType: persisted.mimeType,
+            sizeBytes: persisted.sizeBytes,
+            prompt: updated.prompt,
+            model: updated.model,
+            meta: {
+              sourceUrl: videoUrl,
+              falRequestId: updated.runpod_job_id,
+              seed: falStatus.seed,
+            },
+          });
 
-        updated = await updateJobStatus({
-          jobId: current.id,
-          status: "COMPLETED",
-          progressPercent: runpod.progressPercent,
-          delayTimeMs: runpod.delayTime,
-          executionTimeMs: runpod.executionTime,
-          errorReason: null,
-          runpodRaw: runpod.raw,
-          outputMediaId: media.id,
-        });
+          updated = await updateJobStatus({
+            jobId: current.id,
+            status: "COMPLETED",
+            progressPercent: 100,
+            delayTimeMs: current.delay_time_ms,
+            executionTimeMs: current.execution_time_ms,
+            errorReason: null,
+            runpodRaw: falStatus.raw,
+            outputMediaId: media.id,
+          });
 
+          await createJobEvent(
+            user.id, current.id, "COMPLETED",
+            "Media downloaded from fal.ai and saved to storage via programmatic API.",
+            falStatus.raw,
+          );
+        }
+      }
+    } else {
+      // ── RunPod polling ──
+      let runpod;
+      try {
+        runpod = await getRunpodJobStatus(current.mode, current.runpod_job_id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Polling failed.";
+        return NextResponse.json(
+          { success: false, message },
+          { status: 502 },
+        );
+      }
+
+      updated = await updateJobStatus({
+        jobId: current.id,
+        status: runpod.status,
+        progressPercent: runpod.progressPercent,
+        delayTimeMs: runpod.delayTime,
+        executionTimeMs: runpod.executionTime,
+        errorReason: runpod.error,
+        runpodRaw: runpod.raw,
+      });
+
+      if (updated.status !== current.status) {
         await createJobEvent(
           user.id,
           current.id,
-          "COMPLETED",
-          "Media downloaded and saved to storage via programmatic API.",
+          updated.status,
+          runpod.error || `RunPod status updated to ${updated.status}.`,
           runpod.raw,
         );
+      }
+
+      if (updated.status === "COMPLETED" && !updated.output_media_id) {
+        const kind = updated.mode.startsWith("video") ? "video" : "image";
+        const url = extractMediaUrlFromOutput(runpod.output, kind);
+
+        if (!url) {
+          updated = await updateJobStatus({
+            jobId: current.id,
+            status: "FAILED",
+            progressPercent: null,
+            delayTimeMs: runpod.delayTime,
+            executionTimeMs: runpod.executionTime,
+            errorReason: "RunPod completed but no downloadable media URL was found.",
+            runpodRaw: runpod.raw,
+          });
+        } else {
+          const persisted = await persistRemoteMediaToStorage({
+            userId: user.id,
+            jobId: current.id,
+            remoteUrl: url,
+            kind,
+          });
+
+          const media = await createMediaAsset({
+            userId: user.id,
+            jobId: current.id,
+            kind,
+            storagePath: persisted.path,
+            mimeType: persisted.mimeType,
+            sizeBytes: persisted.sizeBytes,
+            prompt: updated.prompt,
+            model: updated.model,
+            meta: { sourceUrl: url, runpodJobId: updated.runpod_job_id },
+          });
+
+          updated = await updateJobStatus({
+            jobId: current.id,
+            status: "COMPLETED",
+            progressPercent: runpod.progressPercent,
+            delayTimeMs: runpod.delayTime,
+            executionTimeMs: runpod.executionTime,
+            errorReason: null,
+            runpodRaw: runpod.raw,
+            outputMediaId: media.id,
+          });
+
+          await createJobEvent(
+            user.id,
+            current.id,
+            "COMPLETED",
+            "Media downloaded and saved to storage via programmatic API.",
+            runpod.raw,
+          );
+        }
       }
     }
 

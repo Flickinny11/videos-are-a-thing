@@ -74,7 +74,7 @@ export async function POST(
         return fail("Input media path does not belong to this user.", 403);
       }
       inputImageUrl = await createSignedInputUrlFromPath(source.input_media_path);
-    } else if (source.mode === "video:i2v" || source.mode === "video:fal-i2v" || source.mode === "image:flux" || source.mode === "image:qwen") {
+    } else if (source.mode === "video:i2v" || source.mode === "video:fal-i2v" || source.mode === "video:fal-i2v-2.7" || source.mode === "image:flux" || source.mode === "image:qwen") {
       return fail("Source input image for this job is missing, cannot retry.", 400);
     }
 
@@ -86,14 +86,15 @@ export async function POST(
     if (isFalMode(source.mode)) {
       try {
         const falResult = await startFalJob({
+          mode: source.mode,
           prompt: source.prompt,
-          imageUrl: inputImageUrl!,
-          duration: String(source.duration_seconds || 5) as "5" | "10" | "15",
+          imageUrl: inputImageUrl,
+          duration: String(source.duration_seconds || 5),
         });
         providerJobId = falResult.requestId;
         providerStatus = falResult.status;
         providerRaw = falResult.raw;
-        model = falModelName;
+        model = falModelName(source.mode);
       } catch (error) {
         const normalized = normalizeProviderError(error);
         return fail(normalized.message, normalized.status);
