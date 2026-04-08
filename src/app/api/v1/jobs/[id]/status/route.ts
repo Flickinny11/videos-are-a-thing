@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth";
-import { getFalJobStatus, isFalMode } from "@/lib/fal";
+import { falMediaKind, getFalJobStatus, isFalMode } from "@/lib/fal";
 import {
   createJobEvent,
   createMediaAsset,
@@ -73,36 +73,37 @@ export async function POST(
       }
 
       if (updated.status === "COMPLETED" && !updated.output_media_id) {
-        const videoUrl = falStatus.videoUrl;
-        if (!videoUrl) {
+        const mediaUrl = falStatus.mediaUrl;
+        const kind = falMediaKind(current.mode);
+        if (!mediaUrl) {
           updated = await updateJobStatus({
             jobId: current.id,
             status: "FAILED",
             progressPercent: null,
             delayTimeMs: current.delay_time_ms,
             executionTimeMs: current.execution_time_ms,
-            errorReason: "fal.ai completed but no downloadable video URL was found.",
+            errorReason: `fal.ai completed but no downloadable ${kind} URL was found.`,
             runpodRaw: falStatus.raw,
           });
         } else {
           const persisted = await persistRemoteMediaToStorage({
             userId: user.id,
             jobId: current.id,
-            remoteUrl: videoUrl,
-            kind: "video",
+            remoteUrl: mediaUrl,
+            kind,
           });
 
           const media = await createMediaAsset({
             userId: user.id,
             jobId: current.id,
-            kind: "video",
+            kind,
             storagePath: persisted.path,
             mimeType: persisted.mimeType,
             sizeBytes: persisted.sizeBytes,
             prompt: updated.prompt,
             model: updated.model,
             meta: {
-              sourceUrl: videoUrl,
+              sourceUrl: mediaUrl,
               falRequestId: updated.runpod_job_id,
               seed: falStatus.seed,
             },

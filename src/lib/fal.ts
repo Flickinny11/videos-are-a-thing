@@ -1,13 +1,19 @@
 import { envServer } from "@/lib/env/server";
-import type { JobMode, JobStatus } from "@/types/app";
+import type { JobMode, JobStatus, MediaKind } from "@/types/app";
 
 /**
- * fal.ai Queue API client for Wan video models.
+ * fal.ai Queue API client for Wan models.
  *
  * Supported models:
- *   - Wan v2.6 Image-to-Video   (video:fal-i2v)
- *   - Wan v2.7 Image-to-Video   (video:fal-i2v-2.7)
- *   - Wan v2.7 Reference-to-Video (video:fal-r2v-2.7)
+ *   Video:
+ *     - Wan v2.6 Image-to-Video        (video:fal-i2v)
+ *     - Wan v2.7 Image-to-Video        (video:fal-i2v-2.7)
+ *     - Wan v2.7 Reference-to-Video    (video:fal-r2v-2.7)
+ *   Image:
+ *     - Wan v2.7 Edit (I2I)            (image:fal-edit-2.7)
+ *     - Wan v2.7 Pro Edit (I2I)        (image:fal-pro-edit-2.7)
+ *     - Wan v2.7 Text-to-Image         (image:fal-t2i-2.7)
+ *     - Wan v2.7 Pro Text-to-Image     (image:fal-pro-t2i-2.7)
  *
  * Queue endpoints (per https://fal.ai/docs/model-apis/model-endpoints/queue):
  *   POST   https://queue.fal.run/{model-id}                          -> submit
@@ -20,9 +26,15 @@ const FAL_QUEUE_BASE = "https://queue.fal.run";
 
 /** Map each fal.ai JobMode to its fal model ID. */
 const FAL_MODEL_IDS: Record<string, string> = {
+  // Video models
   "video:fal-i2v": "wan/v2.6/image-to-video",
   "video:fal-i2v-2.7": "wan/v2.7/image-to-video",
   "video:fal-r2v-2.7": "wan/v2.7/reference-to-video",
+  // Image models
+  "image:fal-edit-2.7": "wan/v2.7/edit",
+  "image:fal-pro-edit-2.7": "wan/v2.7/pro/edit",
+  "image:fal-t2i-2.7": "wan/v2.7/text-to-image",
+  "image:fal-pro-t2i-2.7": "wan/v2.7/pro/text-to-image",
 };
 
 const falModelIdForMode = (mode: string): string => {
@@ -33,10 +45,19 @@ const falModelIdForMode = (mode: string): string => {
 
 // ── Shared types ────────────────────────────────────────────────────
 
+export type FalImageSize =
+  | "square_hd"
+  | "square"
+  | "portrait_4_3"
+  | "portrait_16_9"
+  | "landscape_4_3"
+  | "landscape_16_9";
+
 export interface FalStartRequest {
   mode: JobMode;
   prompt: string;
   negativePrompt?: string;
+  // ── Video params ──
   resolution?: "720p" | "1080p";
   duration?: string;
   /** Wan 2.6 & 2.7 I2V: primary start-frame image */
@@ -57,6 +78,13 @@ export interface FalStartRequest {
   aspectRatio?: "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
   /** Wan 2.7 R2V: multi-shot segmentation */
   multiShots?: boolean;
+  // ── Image params ──
+  /** Edit models: array of image URLs (1-4 for edit, required) */
+  imageUrls?: string[];
+  /** Image size preset */
+  imageSize?: FalImageSize;
+  /** Number of images to generate (edit: 1-4, t2i: 1-5) */
+  numImages?: number;
 }
 
 export interface FalRunResponse {
@@ -69,7 +97,8 @@ export interface FalStatusResponse {
   requestId: string;
   status: JobStatus;
   progress: number | null;
-  videoUrl: string | null;
+  /** URL of generated media (video URL or first image URL) */
+  mediaUrl: string | null;
   seed: number | null;
   error: string | null;
   raw: Record<string, unknown>;
@@ -179,6 +208,32 @@ const buildPayloadV27R2V = (input: FalStartRequest): Record<string, unknown> => 
   return payload;
 };
 
+/** Wan 2.7 Edit & Pro Edit (image-to-image). */
+const buildPayloadEdit = (input: FalStartRequest): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {
+    prompt: input.prompt,
+    image_urls: input.imageUrls || [],
+    image_size: input.imageSize || "square_hd",
+    num_images: input.numImages || 1,
+    enable_prompt_expansion: input.enablePromptExpansion ?? true,
+    enable_safety_checker: false,
+  };
+  if (input.negativePrompt) payload.negative_prompt = input.negativePrompt;
+  return payload;
+};
+
+/** Wan 2.7 T2I & Pro T2I (text-to-image). */
+const buildPayloadT2I = (input: FalStartRequest): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {
+    prompt: input.prompt,
+    image_size: input.imageSize || "square_hd",
+    max_images: input.numImages || 1,
+    enable_safety_checker: false,
+  };
+  if (input.negativePrompt) payload.negative_prompt = input.negativePrompt;
+  return payload;
+};
+
 const buildPayload = (input: FalStartRequest): Record<string, unknown> => {
   switch (input.mode) {
     case "video:fal-i2v":
@@ -187,6 +242,12 @@ const buildPayload = (input: FalStartRequest): Record<string, unknown> => {
       return buildPayloadV27I2V(input);
     case "video:fal-r2v-2.7":
       return buildPayloadV27R2V(input);
+    case "image:fal-edit-2.7":
+    case "image:fal-pro-edit-2.7":
+      return buildPayloadEdit(input);
+    case "image:fal-t2i-2.7":
+    case "image:fal-pro-t2i-2.7":
+      return buildPayloadT2I(input);
     default:
       throw new Error(`Unsupported fal mode: ${input.mode}`);
   }
@@ -195,7 +256,7 @@ const buildPayload = (input: FalStartRequest): Record<string, unknown> => {
 // ── Submit ──────────────────────────────────────────────────────────
 
 /**
- * Submit a video generation job to the fal.ai queue.
+ * Submit a generation job to the fal.ai queue.
  *
  * POST https://queue.fal.run/{model-id}
  * Authorization: Key $FAL_KEY
@@ -243,6 +304,26 @@ export const startFalJob = async (input: FalStartRequest): Promise<FalRunRespons
   };
 };
 
+// ── Result extraction helpers ───────────────────────────────────────
+
+/**
+ * Extract the primary media URL from a fal.ai completed result body.
+ * Video models return { video: { url } }.
+ * Image models return { images: [{ url }] }.
+ */
+const extractMediaUrl = (resultBody: Record<string, unknown>, mode: string): string | null => {
+  if (mode.startsWith("video:")) {
+    const video = resultBody.video as Record<string, unknown> | undefined;
+    return typeof video?.url === "string" ? video.url : null;
+  }
+  // Image models return images array
+  const images = resultBody.images as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(images) && images.length > 0) {
+    return typeof images[0].url === "string" ? images[0].url : null;
+  }
+  return null;
+};
+
 // ── Poll ────────────────────────────────────────────────────────────
 
 /**
@@ -252,7 +333,8 @@ export const startFalJob = async (input: FalStartRequest): Promise<FalRunRespons
  *   -> { status, queue_position, logs, metrics }
  *
  * Step 2 (only when COMPLETED): GET .../requests/{id}
- *   -> { video: { url, content_type }, seed, actual_prompt }
+ *   -> Video: { video: { url, content_type }, seed, actual_prompt }
+ *   -> Image: { images: [{ url, content_type }], seed }
  */
 export const getFalJobStatus = async (
   mode: string,
@@ -337,15 +419,14 @@ export const getFalJobStatus = async (
       throw new FalError(resultBody, resultResponse.status);
     }
 
-    const video = resultBody.video as Record<string, unknown> | undefined;
-    const videoUrl = typeof video?.url === "string" ? video.url : null;
+    const mediaUrl = extractMediaUrl(resultBody, mode);
     const seed = typeof resultBody.seed === "number" ? resultBody.seed : null;
 
     return {
       requestId,
       status: "COMPLETED",
       progress: 100,
-      videoUrl,
+      mediaUrl,
       seed,
       error: null,
       raw: resultBody,
@@ -364,7 +445,7 @@ export const getFalJobStatus = async (
       requestId,
       status: "FAILED",
       progress: null,
-      videoUrl: null,
+      mediaUrl: null,
       seed: null,
       error: errorMsg,
       raw: statusBody,
@@ -375,7 +456,7 @@ export const getFalJobStatus = async (
     requestId,
     status: mappedStatus,
     progress,
-    videoUrl: null,
+    mediaUrl: null,
     seed: null,
     error: null,
     raw: statusBody,
@@ -387,10 +468,18 @@ export const getFalJobStatus = async (
 export const isFalMode = (mode: string): boolean =>
   mode in FAL_MODEL_IDS;
 
+/** Determine media kind for a fal.ai mode. */
+export const falMediaKind = (mode: string): MediaKind =>
+  mode.startsWith("video:") ? "video" : "image";
+
 const FAL_MODEL_NAMES: Record<string, string> = {
   "video:fal-i2v": "wan-v2.6-fal-i2v",
   "video:fal-i2v-2.7": "wan-v2.7-fal-i2v",
   "video:fal-r2v-2.7": "wan-v2.7-fal-r2v",
+  "image:fal-edit-2.7": "wan-v2.7-fal-edit",
+  "image:fal-pro-edit-2.7": "wan-v2.7-fal-pro-edit",
+  "image:fal-t2i-2.7": "wan-v2.7-fal-t2i",
+  "image:fal-pro-t2i-2.7": "wan-v2.7-fal-pro-t2i",
 };
 
 export const falModelName = (mode: string): string =>

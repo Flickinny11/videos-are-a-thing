@@ -119,13 +119,23 @@ export async function POST(request: Request) {
         "seedream-edit": "image:seedream-edit",
         "nano-banana": "image:nano-banana",
         "z-turbo": "image:z-turbo",
+        "fal-edit-2.7": "image:fal-edit-2.7",
+        "fal-pro-edit-2.7": "image:fal-pro-edit-2.7",
+        "fal-t2i-2.7": "image:fal-t2i-2.7",
+        "fal-pro-t2i-2.7": "image:fal-pro-t2i-2.7",
       };
       mode = imageModelMap[imageModel] || "image:flux-schnell";
     }
 
-    // R2V uses referenceImage fields; I2V 2.7 image is optional; T2V is text-only
-    const textOnlyModes: JobMode[] = ["video:t2v", "video:fal-r2v-2.7", "video:fal-i2v-2.7", "image:flux-dev", "image:flux-schnell", "image:qwen-t2i"];
-    const fileRequired = !textOnlyModes.includes(mode);
+    // Modes that don't require the main sourceFile upload:
+    // - T2V, R2V (ref images), I2V 2.7 (optional), fal T2I, fal edit (uses editImage fields)
+    const noSourceFileModes: JobMode[] = [
+      "video:t2v", "video:fal-r2v-2.7", "video:fal-i2v-2.7",
+      "image:flux-dev", "image:flux-schnell", "image:qwen-t2i",
+      "image:fal-t2i-2.7", "image:fal-pro-t2i-2.7",
+      "image:fal-edit-2.7", "image:fal-pro-edit-2.7",
+    ];
+    const fileRequired = !noSourceFileModes.includes(mode);
     let inputPath: string | null = null;
     let inputSignedUrl: string | undefined;
 
@@ -183,6 +193,25 @@ export async function POST(request: Request) {
       }
     }
 
+    // Handle fal.ai edit model image uploads (1-4 images via editImage_* fields)
+    const editImageUrls: string[] = [];
+    if (mode === "image:fal-edit-2.7" || mode === "image:fal-pro-edit-2.7") {
+      for (const [key, value] of formData.entries()) {
+        if (key.startsWith("editImage_") && value instanceof File && value.size > 0) {
+          const upload = await saveUploadedInput({ userId: user.id, file: value });
+          editImageUrls.push(upload.signedUrl);
+        }
+      }
+      if (editImageUrls.length === 0) {
+        return fail("At least one image is required for edit models.");
+      }
+    }
+
+    // Image size and num_images for fal.ai image models
+    const imageSizeRaw = String(formData.get("imageSize") || "square_hd").trim();
+    const numImagesRaw = Number(formData.get("numImages") || 1);
+    const numImages = numImagesRaw >= 1 && numImagesRaw <= 5 ? numImagesRaw : 1;
+
     const aspectRatioRaw = String(formData.get("aspectRatio") || "16:9").trim();
     const aspectRatio = (["16:9", "9:16", "1:1", "4:3", "3:4"] as const).includes(
       aspectRatioRaw as "16:9"
@@ -208,6 +237,9 @@ export async function POST(request: Request) {
           aspectRatio,
           multiShots,
           enablePromptExpansion,
+          imageUrls: editImageUrls.length > 0 ? editImageUrls : undefined,
+          imageSize: imageSizeRaw as import("@/lib/fal").FalImageSize,
+          numImages,
         });
         providerJobId = falResult.requestId;
         providerStatus = falResult.status;

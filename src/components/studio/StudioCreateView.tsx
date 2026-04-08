@@ -36,6 +36,11 @@ export function StudioCreateView() {
   const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16" | "1:1" | "4:3" | "3:4">("16:9");
   const [multiShots, setMultiShots] = useState(false);
 
+  // fal.ai image model extras
+  const [editImages, setEditImages] = useState<File[]>([]);
+  const [imageSize, setImageSize] = useState<string>("square_hd");
+  const [numImages, setNumImages] = useState(1);
+
   const isFalProvider = videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7";
 
   const fileRequired = useMemo(
@@ -46,8 +51,13 @@ export function StudioCreateView() {
         if (videoProvider === "fal") return true;
         return videoMode === "i2v";
       }
-      const textOnlyModels = ["flux-dev", "flux-schnell", "qwen-t2i"];
-      if (textOnlyModels.includes(imageModel)) return false;
+      // T2I models need no file; fal edit models use editImages (multi-upload), not sourceFile
+      const noSourceFileModels = [
+        "flux-dev", "flux-schnell", "qwen-t2i",
+        "fal-t2i-2.7", "fal-pro-t2i-2.7",
+        "fal-edit-2.7", "fal-pro-edit-2.7",
+      ];
+      if (noSourceFileModels.includes(imageModel)) return false;
       return true;
     },
     [mediaType, videoMode, videoProvider, imageModel],
@@ -102,6 +112,17 @@ export function StudioCreateView() {
         referenceVideos.forEach((file, i) => body.append(`referenceVideo_${i}`, file));
       }
 
+      // fal.ai image model extras
+      const isFalImageModel = ["fal-edit-2.7", "fal-pro-edit-2.7", "fal-t2i-2.7", "fal-pro-t2i-2.7"].includes(imageModel);
+      if (mediaType === "image" && isFalImageModel) {
+        body.set("imageSize", imageSize);
+        body.set("numImages", String(numImages));
+        if (imageModel === "fal-edit-2.7" || imageModel === "fal-pro-edit-2.7") {
+          body.set("enablePromptExpansion", String(enablePromptExpansion));
+          editImages.forEach((file, i) => body.append(`editImage_${i}`, file));
+        }
+      }
+
       const response = await fetch("/api/jobs", {
         method: "POST",
         body,
@@ -120,6 +141,7 @@ export function StudioCreateView() {
       setEndImageFile(null);
       setReferenceImages([]);
       setReferenceVideos([]);
+      setEditImages([]);
       router.push("/queue");
       router.refresh();
     } catch (err) {
@@ -427,6 +449,14 @@ export function StudioCreateView() {
                 value={imageModel}
                 onChange={(event) => setImageModel(event.target.value)}
               >
+                <optgroup label="Wan 2.7 fal.ai - Text-to-Image">
+                  <option value="fal-t2i-2.7">Wan 2.7 T2I (fal.ai, $0.03)</option>
+                  <option value="fal-pro-t2i-2.7">Wan 2.7 Pro T2I (fal.ai, premium)</option>
+                </optgroup>
+                <optgroup label="Wan 2.7 fal.ai - Image Edit (1-4 images)">
+                  <option value="fal-edit-2.7">Wan 2.7 Edit (fal.ai, $0.03)</option>
+                  <option value="fal-pro-edit-2.7">Wan 2.7 Pro Edit (fal.ai, $0.075)</option>
+                </optgroup>
                 <optgroup label="Text-to-Image (no upload needed)">
                   <option value="flux-schnell">Flux 1 Schnell (fast)</option>
                   <option value="flux-dev">Flux 1 Dev (quality)</option>
@@ -442,6 +472,100 @@ export function StudioCreateView() {
                   <option value="z-turbo">Z-Image Turbo (i2i)</option>
                 </optgroup>
               </select>
+
+              {/* fal.ai image model config options */}
+              {["fal-t2i-2.7", "fal-pro-t2i-2.7", "fal-edit-2.7", "fal-pro-edit-2.7"].includes(imageModel) ? (
+                <div className="space-y-4 rounded-2xl border border-violet-300/20 bg-violet-950/20 p-4">
+                  <p className="text-xs text-violet-300/70">fal.ai &middot; Wan 2.7 &middot; Safety filter disabled</p>
+
+                  {/* Image Size */}
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Image Size</label>
+                    <div className="flex flex-wrap gap-2">
+                      {([
+                        { value: "square_hd", label: "Square HD" },
+                        { value: "square", label: "Square" },
+                        { value: "portrait_4_3", label: "Portrait 4:3" },
+                        { value: "portrait_16_9", label: "Portrait 16:9" },
+                        { value: "landscape_4_3", label: "Landscape 4:3" },
+                        { value: "landscape_16_9", label: "Landscape 16:9" },
+                      ] as const).map(({ value, label }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={pill(imageSize === value)}
+                          onClick={() => setImageSize(value)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Number of Images */}
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">
+                      Number of Images (max {["fal-edit-2.7", "fal-pro-edit-2.7"].includes(imageModel) ? 4 : 5})
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {(["fal-edit-2.7", "fal-pro-edit-2.7"].includes(imageModel)
+                        ? [1, 2, 3, 4]
+                        : [1, 2, 3, 4, 5]
+                      ).map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          className={pill(numImages === n)}
+                          onClick={() => setNumImages(n)}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Prompt Expansion - edit models only */}
+                  {["fal-edit-2.7", "fal-pro-edit-2.7"].includes(imageModel) ? (
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        className={pill(enablePromptExpansion, "amber")}
+                        onClick={() => setEnablePromptExpansion(!enablePromptExpansion)}
+                      >
+                        Prompt Expansion: {enablePromptExpansion ? "ON" : "OFF"}
+                      </button>
+                      <span className="text-xs text-cyan-100/60">DashScope prompt expansion</span>
+                    </div>
+                  ) : null}
+
+                  {/* Edit Images upload (1-4 images) - edit models only */}
+                  {["fal-edit-2.7", "fal-pro-edit-2.7"].includes(imageModel) ? (
+                    <div>
+                      <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">
+                        Input Images (1-4, required)
+                      </label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
+                        onChange={(event) => {
+                          const files = event.target.files;
+                          if (files) setEditImages(Array.from(files).slice(0, 4));
+                        }}
+                      />
+                      <p className="mt-1 text-xs text-cyan-200/50">
+                        Reference them as &quot;image 1&quot;, &quot;image 2&quot;, etc. in your prompt. Supports Chinese and English.
+                      </p>
+                      {editImages.length > 0 ? (
+                        <p className="mt-1 text-xs text-emerald-300/70">{editImages.length} image(s) selected</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Standard file upload for non-fal image models */}
               {fileRequired ? (
                 <input
                   type="file"
@@ -499,8 +623,8 @@ export function StudioCreateView() {
           </EffectsErrorBoundary>
         </div>
         <div className="mt-4 space-y-3 text-xs text-cyan-100/75">
-          <p>Video modes: WAN 2.6 T2V + WAN 2.6 I2V (RunPod) + WAN 2.6 I2V (fal.ai) + WAN 2.7 I2V (fal.ai) + WAN 2.7 R2V (fal.ai)</p>
-          <p>Image modes: Qwen Image Edit + Flux Kontext Dev</p>
+          <p>Video: WAN 2.6 T2V/I2V (RunPod) + WAN 2.6/2.7 I2V + WAN 2.7 R2V (fal.ai)</p>
+          <p>Image: Wan 2.7 T2I/Edit/Pro (fal.ai) + Qwen + Flux + more</p>
           <p>Upload inputs are private signed URLs and outputs are re-hosted to your storage bucket.</p>
         </div>
       </article>

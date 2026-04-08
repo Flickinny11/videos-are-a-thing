@@ -86,6 +86,8 @@ export async function POST(request: Request) {
       "image:flux", "image:flux-dev", "image:flux-schnell",
       "image:qwen-t2i", "image:qwen", "image:qwen-2511",
       "image:p-edit", "image:seedream-edit", "image:nano-banana", "image:z-turbo",
+      "image:fal-edit-2.7", "image:fal-pro-edit-2.7",
+      "image:fal-t2i-2.7", "image:fal-pro-t2i-2.7",
     ];
 
     const results = await Promise.allSettled(
@@ -98,7 +100,12 @@ export async function POST(request: Request) {
         }
 
         const mode = step.service;
-        const textOnlyModes: JobMode[] = ["video:t2v", "video:fal-r2v-2.7", "video:fal-i2v-2.7", "image:flux-dev", "image:flux-schnell", "image:qwen-t2i"];
+        const textOnlyModes: JobMode[] = [
+          "video:t2v", "video:fal-r2v-2.7", "video:fal-i2v-2.7",
+          "image:flux-dev", "image:flux-schnell", "image:qwen-t2i",
+          "image:fal-t2i-2.7", "image:fal-pro-t2i-2.7",
+          "image:fal-edit-2.7", "image:fal-pro-edit-2.7",
+        ];
         const fileRequired = !textOnlyModes.includes(mode);
 
         let inputSignedUrl = step.inputImageUrl;

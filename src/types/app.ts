@@ -15,7 +15,11 @@ export type JobMode =
   | "image:p-edit"
   | "image:seedream-edit"
   | "image:nano-banana"
-  | "image:z-turbo";
+  | "image:z-turbo"
+  | "image:fal-edit-2.7"
+  | "image:fal-pro-edit-2.7"
+  | "image:fal-t2i-2.7"
+  | "image:fal-pro-t2i-2.7";
 
 export type JobStatus =
   | "IN_QUEUE"
