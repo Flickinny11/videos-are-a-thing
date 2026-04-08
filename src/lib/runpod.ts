@@ -7,6 +7,8 @@ const MODEL_ENDPOINT_BY_MODE: Record<JobMode, string> = {
   "video:t2v": "wan-2-6-t2v",
   "video:i2v": "wan-2-6-i2v",
   "video:fal-i2v": "wan-v2.6-fal-i2v", // routed through fal.ai, not RunPod
+  "video:fal-i2v-2.7": "wan-v2.7-fal-i2v", // routed through fal.ai, not RunPod
+  "video:fal-r2v-2.7": "wan-v2.7-fal-r2v", // routed through fal.ai, not RunPod
   "image:flux": "black-forest-labs-flux-1-kontext-dev",
   "image:flux-dev": "black-forest-labs-flux-1-dev",
   "image:flux-schnell": "black-forest-labs-flux-1-schnell",
