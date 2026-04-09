@@ -28,7 +28,7 @@ const FAL_QUEUE_BASE = "https://queue.fal.run";
 /** Map each fal.ai JobMode to its fal model ID. */
 const FAL_MODEL_IDS: Record<string, string> = {
   // Video models
-  "video:fal-i2v": "fal-ai/wan/v2.6/image-to-video",
+  "video:fal-i2v": "wan/v2.6/image-to-video",
   "video:fal-i2v-2.7": "fal-ai/wan/v2.7/image-to-video",
   "video:fal-r2v-2.7": "fal-ai/wan/v2.7/reference-to-video",
   // Image models
