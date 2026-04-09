@@ -123,6 +123,7 @@ export async function POST(request: Request) {
         "fal-pro-edit-2.7": "image:fal-pro-edit-2.7",
         "fal-t2i-2.7": "image:fal-t2i-2.7",
         "fal-pro-t2i-2.7": "image:fal-pro-t2i-2.7",
+        "fal-seedream-edit-4.5": "image:fal-seedream-edit-4.5",
       };
       mode = imageModelMap[imageModel] || "image:flux-schnell";
     }
@@ -134,6 +135,7 @@ export async function POST(request: Request) {
       "image:flux-dev", "image:flux-schnell", "image:qwen-t2i",
       "image:fal-t2i-2.7", "image:fal-pro-t2i-2.7",
       "image:fal-edit-2.7", "image:fal-pro-edit-2.7",
+      "image:fal-seedream-edit-4.5",
     ];
     const fileRequired = !noSourceFileModes.includes(mode);
     let inputPath: string | null = null;
@@ -193,9 +195,9 @@ export async function POST(request: Request) {
       }
     }
 
-    // Handle fal.ai edit model image uploads (1-4 images via editImage_* fields)
+    // Handle fal.ai edit model image uploads (editImage_* fields)
     const editImageUrls: string[] = [];
-    if (mode === "image:fal-edit-2.7" || mode === "image:fal-pro-edit-2.7") {
+    if (mode === "image:fal-edit-2.7" || mode === "image:fal-pro-edit-2.7" || mode === "image:fal-seedream-edit-4.5") {
       for (const [key, value] of formData.entries()) {
         if (key.startsWith("editImage_") && value instanceof File && value.size > 0) {
           const upload = await saveUploadedInput({ userId: user.id, file: value });
@@ -207,10 +209,12 @@ export async function POST(request: Request) {
       }
     }
 
-    // Image size and num_images for fal.ai image models
+    // Image size, num_images, and max_images for fal.ai image models
     const imageSizeRaw = String(formData.get("imageSize") || "square_hd").trim();
     const numImagesRaw = Number(formData.get("numImages") || 1);
-    const numImages = numImagesRaw >= 1 && numImagesRaw <= 5 ? numImagesRaw : 1;
+    const numImages = numImagesRaw >= 1 && numImagesRaw <= 6 ? numImagesRaw : 1;
+    const maxImagesRaw = Number(formData.get("maxImages") || 1);
+    const maxImages = maxImagesRaw >= 1 && maxImagesRaw <= 6 ? maxImagesRaw : 1;
 
     const aspectRatioRaw = String(formData.get("aspectRatio") || "16:9").trim();
     const aspectRatio = (["16:9", "9:16", "1:1", "4:3", "3:4"] as const).includes(
@@ -240,6 +244,7 @@ export async function POST(request: Request) {
           imageUrls: editImageUrls.length > 0 ? editImageUrls : undefined,
           imageSize: imageSizeRaw as import("@/lib/fal").FalImageSize,
           numImages,
+          maxImages: maxImages > 1 ? maxImages : undefined,
         });
         providerJobId = falResult.requestId;
         providerStatus = falResult.status;

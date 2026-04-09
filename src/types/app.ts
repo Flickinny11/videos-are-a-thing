@@ -19,7 +19,8 @@ export type JobMode =
   | "image:fal-edit-2.7"
   | "image:fal-pro-edit-2.7"
   | "image:fal-t2i-2.7"
-  | "image:fal-pro-t2i-2.7";
+  | "image:fal-pro-t2i-2.7"
+  | "image:fal-seedream-edit-4.5";
 
 export type JobStatus =
   | "IN_QUEUE"

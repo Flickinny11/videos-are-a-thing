@@ -40,6 +40,7 @@ export function StudioCreateView() {
   const [editImages, setEditImages] = useState<File[]>([]);
   const [imageSize, setImageSize] = useState<string>("square_hd");
   const [numImages, setNumImages] = useState(1);
+  const [maxImages, setMaxImages] = useState(1);
 
   const isFalProvider = videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7";
 
@@ -56,6 +57,7 @@ export function StudioCreateView() {
         "flux-dev", "flux-schnell", "qwen-t2i",
         "fal-t2i-2.7", "fal-pro-t2i-2.7",
         "fal-edit-2.7", "fal-pro-edit-2.7",
+        "fal-seedream-edit-4.5",
       ];
       if (noSourceFileModels.includes(imageModel)) return false;
       return true;
@@ -113,12 +115,16 @@ export function StudioCreateView() {
       }
 
       // fal.ai image model extras
-      const isFalImageModel = ["fal-edit-2.7", "fal-pro-edit-2.7", "fal-t2i-2.7", "fal-pro-t2i-2.7"].includes(imageModel);
+      const isFalImageModel = ["fal-edit-2.7", "fal-pro-edit-2.7", "fal-t2i-2.7", "fal-pro-t2i-2.7", "fal-seedream-edit-4.5"].includes(imageModel);
       if (mediaType === "image" && isFalImageModel) {
         body.set("imageSize", imageSize);
         body.set("numImages", String(numImages));
         if (imageModel === "fal-edit-2.7" || imageModel === "fal-pro-edit-2.7") {
           body.set("enablePromptExpansion", String(enablePromptExpansion));
+          editImages.forEach((file, i) => body.append(`editImage_${i}`, file));
+        }
+        if (imageModel === "fal-seedream-edit-4.5") {
+          body.set("maxImages", String(maxImages));
           editImages.forEach((file, i) => body.append(`editImage_${i}`, file));
         }
       }
@@ -457,6 +463,9 @@ export function StudioCreateView() {
                   <option value="fal-edit-2.7">Wan 2.7 Edit (fal.ai, $0.03)</option>
                   <option value="fal-pro-edit-2.7">Wan 2.7 Pro Edit (fal.ai, $0.075)</option>
                 </optgroup>
+                <optgroup label="Seedream 4.5 fal.ai - Image Edit (up to 10 images)">
+                  <option value="fal-seedream-edit-4.5">Seedream 4.5 Edit (fal.ai, $0.04)</option>
+                </optgroup>
                 <optgroup label="Text-to-Image (no upload needed)">
                   <option value="flux-schnell">Flux 1 Schnell (fast)</option>
                   <option value="flux-dev">Flux 1 Dev (quality)</option>
@@ -562,6 +571,101 @@ export function StudioCreateView() {
                       ) : null}
                     </div>
                   ) : null}
+                </div>
+              ) : null}
+
+              {/* Seedream 4.5 Edit config options */}
+              {imageModel === "fal-seedream-edit-4.5" ? (
+                <div className="space-y-4 rounded-2xl border border-violet-300/20 bg-violet-950/20 p-4">
+                  <p className="text-xs text-violet-300/70">fal.ai &middot; Seedream 4.5 &middot; ByteDance &middot; $0.04/image</p>
+
+                  {/* Image Size */}
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Image Size</label>
+                    <div className="flex flex-wrap gap-2">
+                      {([
+                        { value: "auto_4K", label: "Auto 4K" },
+                        { value: "square_hd", label: "Square HD" },
+                        { value: "landscape_16_9", label: "Landscape 16:9" },
+                        { value: "portrait_16_9", label: "Portrait 16:9" },
+                        { value: "landscape_4_3", label: "Landscape 4:3" },
+                        { value: "portrait_4_3", label: "Portrait 4:3" },
+                      ] as const).map(({ value, label }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={pill(imageSize === value)}
+                          onClick={() => setImageSize(value)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Number of Generations */}
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">
+                      Generations (num_images, max 6)
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {[1, 2, 3, 4, 5, 6].map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          className={pill(numImages === n)}
+                          onClick={() => setNumImages(n)}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Max Images per Generation */}
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">
+                      Max Images per Generation (max 6)
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {[1, 2, 3, 4, 5, 6].map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          className={pill(maxImages === n)}
+                          onClick={() => setMaxImages(n)}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-cyan-200/50">
+                      Total output: {numImages} to {maxImages * numImages} images. Input + output must not exceed 15.
+                    </p>
+                  </div>
+
+                  {/* Edit Images upload (up to 10 images) */}
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">
+                      Input Images (1-10, required)
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
+                      onChange={(event) => {
+                        const files = event.target.files;
+                        if (files) setEditImages(Array.from(files).slice(0, 10));
+                      }}
+                    />
+                    <p className="mt-1 text-xs text-cyan-200/50">
+                      Reference them as &quot;Figure 1&quot;, &quot;Figure 2&quot;, etc. in your prompt. Up to 10 images.
+                    </p>
+                    {editImages.length > 0 ? (
+                      <p className="mt-1 text-xs text-emerald-300/70">{editImages.length} image(s) selected</p>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
 

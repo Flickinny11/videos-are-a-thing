@@ -14,6 +14,7 @@ import type { JobMode, JobStatus, MediaKind } from "@/types/app";
  *     - Wan v2.7 Pro Edit (I2I)        (image:fal-pro-edit-2.7)
  *     - Wan v2.7 Text-to-Image         (image:fal-t2i-2.7)
  *     - Wan v2.7 Pro Text-to-Image     (image:fal-pro-t2i-2.7)
+ *     - Seedream 4.5 Edit              (image:fal-seedream-edit-4.5)
  *
  * Queue endpoints (per https://fal.ai/docs/model-apis/model-endpoints/queue):
  *   POST   https://queue.fal.run/{model-id}                          -> submit
@@ -35,6 +36,7 @@ const FAL_MODEL_IDS: Record<string, string> = {
   "image:fal-pro-edit-2.7": "fal-ai/wan/v2.7/pro/edit",
   "image:fal-t2i-2.7": "fal-ai/wan/v2.7/text-to-image",
   "image:fal-pro-t2i-2.7": "fal-ai/wan/v2.7/pro/text-to-image",
+  "image:fal-seedream-edit-4.5": "fal-ai/bytedance/seedream/v4.5/edit",
 };
 
 const falModelIdForMode = (mode: string): string => {
@@ -51,7 +53,8 @@ export type FalImageSize =
   | "portrait_4_3"
   | "portrait_16_9"
   | "landscape_4_3"
-  | "landscape_16_9";
+  | "landscape_16_9"
+  | "auto_4K";
 
 export interface FalStartRequest {
   mode: JobMode;
@@ -83,8 +86,12 @@ export interface FalStartRequest {
   imageUrls?: string[];
   /** Image size preset */
   imageSize?: FalImageSize;
-  /** Number of images to generate (edit: 1-4, t2i: 1-5) */
+  /** Number of images to generate (edit: 1-4, t2i: 1-5, seedream: 1-6) */
   numImages?: number;
+  /** Seedream 4.5: max images per generation (1-6) */
+  maxImages?: number;
+  /** Optional random seed for reproducibility */
+  seed?: number;
 }
 
 export interface FalRunResponse {
@@ -222,6 +229,20 @@ const buildPayloadEdit = (input: FalStartRequest): Record<string, unknown> => {
   return payload;
 };
 
+/** Seedream 4.5 Edit (image-to-image, multi-image input). */
+const buildPayloadSeedreamEdit = (input: FalStartRequest): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {
+    prompt: input.prompt,
+    image_urls: input.imageUrls || [],
+    image_size: input.imageSize || "auto_4K",
+    num_images: input.numImages || 1,
+    max_images: input.maxImages || 1,
+    enable_safety_checker: true,
+  };
+  if (input.seed !== undefined) payload.seed = input.seed;
+  return payload;
+};
+
 /** Wan 2.7 T2I & Pro T2I (text-to-image). */
 const buildPayloadT2I = (input: FalStartRequest): Record<string, unknown> => {
   const payload: Record<string, unknown> = {
@@ -245,6 +266,8 @@ const buildPayload = (input: FalStartRequest): Record<string, unknown> => {
     case "image:fal-edit-2.7":
     case "image:fal-pro-edit-2.7":
       return buildPayloadEdit(input);
+    case "image:fal-seedream-edit-4.5":
+      return buildPayloadSeedreamEdit(input);
     case "image:fal-t2i-2.7":
     case "image:fal-pro-t2i-2.7":
       return buildPayloadT2I(input);
@@ -480,6 +503,7 @@ const FAL_MODEL_NAMES: Record<string, string> = {
   "image:fal-pro-edit-2.7": "wan-v2.7-fal-pro-edit",
   "image:fal-t2i-2.7": "wan-v2.7-fal-t2i",
   "image:fal-pro-t2i-2.7": "wan-v2.7-fal-pro-t2i",
+  "image:fal-seedream-edit-4.5": "seedream-v4.5-fal-edit",
 };
 
 export const falModelName = (mode: string): string =>
