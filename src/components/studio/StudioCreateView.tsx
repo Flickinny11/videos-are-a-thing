@@ -28,6 +28,7 @@ export function StudioCreateView() {
 
   // Wan 2.7 I2V extras
   const [endImageFile, setEndImageFile] = useState<File | null>(null);
+  const [videoClipFile, setVideoClipFile] = useState<File | null>(null);
   const [enablePromptExpansion, setEnablePromptExpansion] = useState(true);
 
   // Wan 2.7 R2V extras
@@ -35,6 +36,9 @@ export function StudioCreateView() {
   const [referenceVideos, setReferenceVideos] = useState<File[]>([]);
   const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16" | "1:1" | "4:3" | "3:4">("16:9");
   const [multiShots, setMultiShots] = useState(false);
+
+  // Optional seed (both 2.7 video models)
+  const [seed, setSeed] = useState<string>("");
 
   // fal.ai image model extras
   const [editImages, setEditImages] = useState<File[]>([]);
@@ -103,6 +107,7 @@ export function StudioCreateView() {
       // Wan 2.7 I2V extras
       if (videoProvider === "fal-i2v-2.7") {
         if (endImageFile) body.set("endImageFile", endImageFile);
+        if (videoClipFile) body.set("videoClipFile", videoClipFile);
         body.set("enablePromptExpansion", String(enablePromptExpansion));
       }
 
@@ -112,6 +117,11 @@ export function StudioCreateView() {
         body.set("multiShots", String(multiShots));
         referenceImages.forEach((file, i) => body.append(`referenceImage_${i}`, file));
         referenceVideos.forEach((file, i) => body.append(`referenceVideo_${i}`, file));
+      }
+
+      // Optional seed for Wan 2.7 video models
+      if ((videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7") && seed.trim()) {
+        body.set("seed", seed.trim());
       }
 
       // fal.ai image model extras
@@ -145,9 +155,11 @@ export function StudioCreateView() {
       setSourceFile(null);
       setAudioFile(null);
       setEndImageFile(null);
+      setVideoClipFile(null);
       setReferenceImages([]);
       setReferenceVideos([]);
       setEditImages([]);
+      setSeed("");
       router.push("/queue");
       router.refresh();
     } catch (err) {
@@ -161,8 +173,8 @@ export function StudioCreateView() {
   const providerOptions: { value: VideoProvider; label: string }[] = [
     { value: "runpod", label: "RunPod" },
     { value: "fal", label: "Wan 2.6 fal.ai (I2V)" },
-    { value: "fal-i2v-2.7", label: "Wan 2.7 fal.ai (I2V)" },
-    { value: "fal-r2v-2.7", label: "Wan 2.7 fal.ai (R2V)" },
+    { value: "fal-i2v-2.7", label: "Wan 2.7 I2V (fal.ai)" },
+    { value: "fal-r2v-2.7", label: "Wan 2.7 R2V (fal.ai)" },
   ];
 
   // Button style helper
@@ -358,39 +370,58 @@ export function StudioCreateView() {
                 </p>
               ) : null}
 
-              {/* Image upload for I2V modes */}
+              {/* Image upload for I2V modes — 1 start frame (JPEG/PNG/BMP/WEBP, max 20 MB) */}
               {(videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoMode === "i2v") && videoProvider !== "fal-r2v-2.7" ? (
                 <div>
                   <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">
-                    Input Image {videoProvider === "fal-i2v-2.7" ? "(optional start frame)" : ""}
+                    Start Frame Image {videoProvider === "fal-i2v-2.7" ? "(optional, 1 image)" : ""}
                   </label>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/png,image/jpeg,image/webp,image/bmp"
                     className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
                     onChange={(event) => setSourceFile(event.target.files?.[0] || null)}
                   />
+                  {videoProvider === "fal-i2v-2.7" ? (
+                    <p className="mt-1 text-xs text-cyan-200/50">JPEG, PNG, BMP, or WEBP — max 20 MB. Mutually exclusive with the video clip below.</p>
+                  ) : null}
                 </div>
               ) : null}
 
-              {/* End image upload - I2V 2.7 only */}
+              {/* End image upload - I2V 2.7 only — 1 end frame */}
               {videoProvider === "fal-i2v-2.7" ? (
                 <div>
-                  <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">End Frame Image (optional)</label>
+                  <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">End Frame Image (optional, 1 image)</label>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/png,image/jpeg,image/webp,image/bmp"
                     className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
                     onChange={(event) => setEndImageFile(event.target.files?.[0] || null)}
                   />
-                  <p className="mt-1 text-xs text-cyan-200/50">First-and-last-frame-to-video: provide both start and end images.</p>
+                  <p className="mt-1 text-xs text-cyan-200/50">First-and-last-frame-to-video: provide start + end images. Same constraints as start frame.</p>
                 </div>
               ) : null}
 
-              {/* Audio upload - fal.ai I2V modes */}
+              {/* Video clip upload - I2V 2.7 only — alternative to image_url */}
+              {videoProvider === "fal-i2v-2.7" ? (
+                <div>
+                  <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-violet-200/80">Video Clip (optional, 1 clip)</label>
+                  <input
+                    type="file"
+                    accept="video/mp4,video/quicktime,.mp4,.mov"
+                    className="block w-full rounded-2xl border border-violet-200/25 bg-slate-900/70 p-3 text-sm"
+                    onChange={(event) => setVideoClipFile(event.target.files?.[0] || null)}
+                  />
+                  <p className="mt-1 text-xs text-violet-200/50">
+                    Continue from a video clip. MP4 or MOV, 2-10s, max 100 MB. Cannot be combined with start frame image.
+                  </p>
+                </div>
+              ) : null}
+
+              {/* Audio upload - fal.ai I2V modes — 1 audio file */}
               {(videoProvider === "fal" || videoProvider === "fal-i2v-2.7") ? (
                 <div>
-                  <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-amber-200/80">Audio (optional)</label>
+                  <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-amber-200/80">Audio (optional, 1 file)</label>
                   <input
                     type="file"
                     accept="audio/wav,audio/mp3,audio/mpeg,.wav,.mp3"
@@ -403,11 +434,29 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              {/* Reference images - R2V only (multiple) */}
+              {/* Seed input - Wan 2.7 video models */}
+              {(videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7") ? (
+                <div>
+                  <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Seed (optional)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={2147483647}
+                    step={1}
+                    placeholder="Leave blank for random"
+                    value={seed}
+                    onChange={(event) => setSeed(event.target.value)}
+                    className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
+                  />
+                  <p className="mt-1 text-xs text-cyan-200/50">Integer 0-2147483647 for reproducible results.</p>
+                </div>
+              ) : null}
+
+              {/* Reference images - R2V only (multiple for multi-subject) */}
               {videoProvider === "fal-r2v-2.7" ? (
                 <>
                   <div>
-                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Reference Images (optional, multiple)</label>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Reference Images (optional, multi-subject)</label>
                     <input
                       type="file"
                       accept="image/*"
@@ -419,7 +468,7 @@ export function StudioCreateView() {
                       }}
                     />
                     <p className="mt-1 text-xs text-cyan-200/50">
-                      Upload one or more reference images for character/object appearance. Max 20 MB each.
+                      Character/object appearance. Pass multiple for multi-subject generation. Max 20 MB each.
                     </p>
                     {referenceImages.length > 0 ? (
                       <p className="mt-1 text-xs text-emerald-300/70">{referenceImages.length} image(s) selected</p>
@@ -427,7 +476,7 @@ export function StudioCreateView() {
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-violet-200/80">Reference Videos (optional, multiple)</label>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-violet-200/80">Reference Videos (optional, multi-subject)</label>
                     <input
                       type="file"
                       accept="video/*"
@@ -439,7 +488,7 @@ export function StudioCreateView() {
                       }}
                     />
                     <p className="mt-1 text-xs text-violet-200/50">
-                      Upload reference videos for motion/appearance. Max 100 MB each.
+                      Character/object appearance and motion. Pass multiple for multi-subject. Max 100 MB each.
                     </p>
                     {referenceVideos.length > 0 ? (
                       <p className="mt-1 text-xs text-emerald-300/70">{referenceVideos.length} video(s) selected</p>
@@ -727,9 +776,9 @@ export function StudioCreateView() {
           </EffectsErrorBoundary>
         </div>
         <div className="mt-4 space-y-3 text-xs text-cyan-100/75">
-          <p>Video: WAN 2.6 T2V/I2V (RunPod) + WAN 2.6/2.7 I2V + WAN 2.7 R2V (fal.ai)</p>
+          <p>Video: WAN 2.6 T2V/I2V (RunPod) + WAN 2.6 I2V + WAN 2.7 I2V (2-15s) + WAN 2.7 R2V (2-10s) on fal.ai</p>
           <p>Image: Wan 2.7 T2I/Edit/Pro (fal.ai) + Qwen + Flux + more</p>
-          <p>Upload inputs are private signed URLs and outputs are re-hosted to your storage bucket.</p>
+          <p>Safety filter disabled on all Wan 2.7 models. Uploads are private signed URLs; outputs re-hosted to storage.</p>
         </div>
       </article>
     </section>
