@@ -104,6 +104,12 @@ export function StudioCreateView() {
       if (sourceFile) body.set("sourceFile", sourceFile);
       if (audioFile) body.set("audioFile", audioFile);
 
+      // Wan 2.6 I2V extras (fal.ai)
+      if (videoProvider === "fal") {
+        body.set("enablePromptExpansion", String(enablePromptExpansion));
+        body.set("multiShots", String(multiShots));
+      }
+
       // Wan 2.7 I2V extras
       if (videoProvider === "fal-i2v-2.7") {
         if (endImageFile) body.set("endImageFile", endImageFile);
@@ -119,8 +125,8 @@ export function StudioCreateView() {
         referenceVideos.forEach((file, i) => body.append(`referenceVideo_${i}`, file));
       }
 
-      // Optional seed for Wan 2.7 video models
-      if ((videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7") && seed.trim()) {
+      // Optional seed for all fal.ai Wan video models
+      if ((videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7") && seed.trim()) {
         body.set("seed", seed.trim());
       }
 
@@ -335,8 +341,8 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              {/* Multi-shots toggle - R2V only */}
-              {videoProvider === "fal-r2v-2.7" ? (
+              {/* Multi-shots toggle - R2V 2.7 and I2V 2.6 */}
+              {(videoProvider === "fal-r2v-2.7" || videoProvider === "fal") ? (
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
@@ -345,12 +351,16 @@ export function StudioCreateView() {
                   >
                     Multi-shots: {multiShots ? "ON" : "OFF"}
                   </button>
-                  <span className="text-xs text-cyan-100/60">Enable intelligent multi-shot segmentation</span>
+                  <span className="text-xs text-cyan-100/60">
+                    {videoProvider === "fal"
+                      ? "Multi-shot segmentation (requires Prompt Expansion ON)"
+                      : "Enable intelligent multi-shot segmentation"}
+                  </span>
                 </div>
               ) : null}
 
-              {/* Prompt expansion toggle - I2V 2.7 only */}
-              {videoProvider === "fal-i2v-2.7" ? (
+              {/* Prompt expansion toggle - I2V 2.7, I2V 2.6, and Wan 2.7 Edit models use separate state */}
+              {(videoProvider === "fal-i2v-2.7" || videoProvider === "fal") ? (
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
@@ -359,7 +369,7 @@ export function StudioCreateView() {
                   >
                     Prompt Expansion: {enablePromptExpansion ? "ON" : "OFF"}
                   </button>
-                  <span className="text-xs text-cyan-100/60">Intelligent prompt rewriting</span>
+                  <span className="text-xs text-cyan-100/60">Intelligent prompt rewriting (LLM)</span>
                 </div>
               ) : null}
 
@@ -434,8 +444,8 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              {/* Seed input - Wan 2.7 video models */}
-              {(videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7") ? (
+              {/* Seed input - all fal.ai Wan video models */}
+              {(videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7") ? (
                 <div>
                   <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Seed (optional)</label>
                   <input

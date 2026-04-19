@@ -166,17 +166,29 @@ const mapFalStatus = (status: string): JobStatus => {
 
 // ── Payload builders ────────────────────────────────────────────────
 
+/**
+ * Wan 2.6 Image-to-Video — wan/v2.6/image-to-video.
+ * Required: prompt (≤800 chars), image_url (240-7680 px).
+ * Duration options are strings: "5" | "10" | "15".
+ * safety_checker OFF per product requirement.
+ */
 const buildPayloadV26I2V = (input: FalStartRequest): Record<string, unknown> => {
+  const rawDuration = String(input.duration ?? "5");
+  const duration = (["5", "10", "15"] as const).includes(rawDuration as "5" | "10" | "15")
+    ? rawDuration
+    : "5";
   const payload: Record<string, unknown> = {
     prompt: input.prompt,
     image_url: input.imageUrl,
     resolution: input.resolution || "1080p",
-    duration: input.duration || "5",
-    enable_prompt_expansion: false,
+    duration,
+    enable_prompt_expansion: input.enablePromptExpansion ?? true,
+    multi_shots: input.multiShots ?? false,
     enable_safety_checker: false,
   };
   if (input.negativePrompt) payload.negative_prompt = input.negativePrompt;
   if (input.audioUrl) payload.audio_url = input.audioUrl;
+  if (typeof input.seed === "number") payload.seed = input.seed;
   return payload;
 };
 
