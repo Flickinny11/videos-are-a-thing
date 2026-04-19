@@ -187,11 +187,17 @@ export async function POST(request: Request) {
       }
     }
 
+    let videoClipSignedUrl: string | undefined;
     if (mode === "video:fal-i2v-2.7") {
       const endImageFile = formData.get("endImageFile");
       if (endImageFile instanceof File && endImageFile.size > 0) {
         const upload = await saveUploadedInput({ userId: user.id, file: endImageFile });
         endImageSignedUrl = upload.signedUrl;
+      }
+      const videoClipFile = formData.get("videoClipFile");
+      if (videoClipFile instanceof File && videoClipFile.size > 0) {
+        const upload = await saveUploadedInput({ userId: user.id, file: videoClipFile });
+        videoClipSignedUrl = upload.signedUrl;
       }
     }
 
@@ -225,6 +231,15 @@ export async function POST(request: Request) {
     const multiShots = formData.get("multiShots") === "true";
     const enablePromptExpansion = formData.get("enablePromptExpansion") !== "false";
 
+    const seedRaw = formData.get("seed");
+    let seed: number | undefined;
+    if (seedRaw !== null && String(seedRaw).trim() !== "") {
+      const seedNum = Number(seedRaw);
+      if (Number.isFinite(seedNum) && seedNum >= 0 && seedNum <= 2147483647) {
+        seed = Math.floor(seedNum);
+      }
+    }
+
     if (isFalMode(mode)) {
       try {
         const falResult = await startFalJob({
@@ -233,6 +248,7 @@ export async function POST(request: Request) {
           imageUrl: inputSignedUrl,
           audioUrl: audioSignedUrl,
           endImageUrl: endImageSignedUrl,
+          videoUrl: videoClipSignedUrl,
           resolution,
           duration: String(duration),
           negativePrompt,
@@ -245,6 +261,7 @@ export async function POST(request: Request) {
           imageSize: imageSizeRaw as import("@/lib/fal").FalImageSize,
           numImages,
           maxImages: maxImages > 1 ? maxImages : undefined,
+          seed,
         });
         providerJobId = falResult.requestId;
         providerStatus = falResult.status;
