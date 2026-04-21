@@ -186,13 +186,19 @@ const buildAtlasPayload = (input: AtlasStartRequest): Record<string, unknown> =>
   const isImageToVideo = input.mode.endsWith("i2v");
 
   if (isReference) {
-    // Atlas reference-to-video authoritative field names (per current Seedance 2.0 spec):
+    // Atlas reference-to-video authoritative field names (per Seedance 2.0 spec):
     //   reference_images, reference_videos, reference_audios.
     if (input.imageUrls?.length) payload.reference_images = input.imageUrls.slice(0, 9);
     if (input.videoUrls?.length) payload.reference_videos = input.videoUrls.slice(0, 3);
     if (input.audioUrls?.length) payload.reference_audios = input.audioUrls.slice(0, 3);
   } else if (isImageToVideo) {
-    if (input.imageUrl) payload.image_url = input.imageUrl;
+    // Atlas Seedance 2.0 I2V field is `image_url`. Some older / related
+    // Atlas docs use `image` instead — include both so we're resilient to
+    // whichever the server currently accepts. Atlas ignores unknown keys.
+    if (input.imageUrl) {
+      payload.image_url = input.imageUrl;
+      payload.image = input.imageUrl;
+    }
     if (input.endImageUrl) payload.end_image_url = input.endImageUrl;
   }
 
