@@ -20,14 +20,14 @@ const normalizeProviderError = (error: unknown): { message: string; status: numb
     if (error.isBillingError) {
       return {
         message:
-          "Atlas Cloud billing error: insufficient credits or limit reached. " +
-          "Please add credits at https://www.atlascloud.ai/console and try again.",
+          `Atlas Cloud billing error: ${error.message}. ` +
+          "Add credits at https://www.atlascloud.ai/console and try again.",
         status: 402,
       };
     }
     return {
       message: `Atlas Cloud request failed (HTTP ${error.httpStatus}): ${error.message}`,
-      status: 502,
+      status: error.httpStatus >= 400 && error.httpStatus < 500 ? error.httpStatus : 502,
     };
   }
   if (error instanceof FalError) {

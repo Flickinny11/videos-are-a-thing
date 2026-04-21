@@ -135,17 +135,28 @@ export class AtlasError extends Error {
     this.atlasBody = body;
 
     const lowerDetail = detail.toLowerCase();
+    // Only flag as billing when the signal is specific. Bare words like
+    // "exceeded" / "insufficient" / "balance" / 429 match many non-billing
+    // errors (duration exceeded, reference count exceeded, rate limited,
+    // white balance, etc.), so we require an explicit credit/billing
+    // co-occurrence or an HTTP 402.
+    const hasBillingPhrase =
+      lowerDetail.includes("insufficient credit") ||
+      lowerDetail.includes("insufficient balance") ||
+      lowerDetail.includes("insufficient funds") ||
+      lowerDetail.includes("no credits") ||
+      lowerDetail.includes("out of credit") ||
+      lowerDetail.includes("credit exceeded") ||
+      lowerDetail.includes("credit limit") ||
+      lowerDetail.includes("quota exceeded") ||
+      lowerDetail.includes("billing") ||
+      lowerDetail.includes("payment required") ||
+      lowerDetail.includes("subscription");
     this.isBillingError =
       httpStatus === 402 ||
-      httpStatus === 429 ||
       (httpStatus === 401 && lowerDetail.includes("credit")) ||
       (httpStatus === 403 && lowerDetail.includes("credit")) ||
-      lowerDetail.includes("insufficient") ||
-      lowerDetail.includes("no credits") ||
-      lowerDetail.includes("billing") ||
-      lowerDetail.includes("out of credit") ||
-      lowerDetail.includes("exceeded") ||
-      lowerDetail.includes("balance");
+      hasBillingPhrase;
   }
 }
 
@@ -175,13 +186,19 @@ const buildAtlasPayload = (input: AtlasStartRequest): Record<string, unknown> =>
   const isImageToVideo = input.mode.endsWith("i2v");
 
   if (isReference) {
-    // Atlas reference-to-video authoritative field names (per current Seedance 2.0 spec):
+    // Atlas reference-to-video authoritative field names (per Seedance 2.0 spec):
     //   reference_images, reference_videos, reference_audios.
     if (input.imageUrls?.length) payload.reference_images = input.imageUrls.slice(0, 9);
     if (input.videoUrls?.length) payload.reference_videos = input.videoUrls.slice(0, 3);
     if (input.audioUrls?.length) payload.reference_audios = input.audioUrls.slice(0, 3);
   } else if (isImageToVideo) {
-    if (input.imageUrl) payload.image_url = input.imageUrl;
+    // Atlas Seedance 2.0 I2V field is `image_url`. Some older / related
+    // Atlas docs use `image` instead — include both so we're resilient to
+    // whichever the server currently accepts. Atlas ignores unknown keys.
+    if (input.imageUrl) {
+      payload.image_url = input.imageUrl;
+      payload.image = input.imageUrl;
+    }
     if (input.endImageUrl) payload.end_image_url = input.endImageUrl;
   }
 
@@ -197,6 +214,16 @@ export const startAtlasJob = async (input: AtlasStartRequest): Promise<AtlasRunR
   }
 
   const payload = buildAtlasPayload(input);
+
+  console.log(
+    `[atlas] submit model=${payload.model} ` +
+      `image_url=${payload.image_url ? "set" : "none"} ` +
+      `end_image_url=${payload.end_image_url ? "set" : "none"} ` +
+      `reference_images=${Array.isArray(payload.reference_images) ? (payload.reference_images as unknown[]).length : 0} ` +
+      `reference_videos=${Array.isArray(payload.reference_videos) ? (payload.reference_videos as unknown[]).length : 0} ` +
+      `reference_audios=${Array.isArray(payload.reference_audios) ? (payload.reference_audios as unknown[]).length : 0} ` +
+      `duration=${payload.duration} resolution=${payload.resolution} ratio=${payload.ratio}`,
+  );
 
   const response = await fetch(`${ATLAS_BASE}/model/generateVideo`, {
     method: "POST",
@@ -216,6 +243,9 @@ export const startAtlasJob = async (input: AtlasStartRequest): Promise<AtlasRunR
   }
 
   if (!response.ok) {
+    console.error(
+      `[atlas] generateVideo failed (HTTP ${response.status}) model=${payload.model} body=${JSON.stringify(body)}`,
+    );
     throw new AtlasError(body, response.status);
   }
 

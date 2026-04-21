@@ -6,6 +6,7 @@ import {
   atlasModelName,
   isAtlasMode,
   startAtlasJob,
+  uploadAtlasMedia,
   type AtlasRatio,
   type AtlasResolution,
 } from "@/lib/atlas";
@@ -34,14 +35,14 @@ const normalizeProviderError = (error: unknown): { message: string; status: numb
     if (error.isBillingError) {
       return {
         message:
-          "Atlas Cloud billing error: insufficient credits or limit reached. " +
-          "Please add credits at https://www.atlascloud.ai/console and try again.",
+          `Atlas Cloud billing error: ${error.message}. ` +
+          "Add credits at https://www.atlascloud.ai/console and try again.",
         status: 402,
       };
     }
     return {
       message: `Atlas Cloud request failed (HTTP ${error.httpStatus}): ${error.message}`,
-      status: 502,
+      status: error.httpStatus >= 400 && error.httpStatus < 500 ? error.httpStatus : 502,
     };
   }
 
@@ -236,35 +237,64 @@ export async function POST(request: Request) {
       }
     }
 
-    // Atlas Cloud Seedance uploads
-    // i2v: optional end frame (endImageFile). sourceFile handled above.
-    // r2v: up to 9 images (atlasRefImage_*), up to 3 videos (atlasRefVideo_*),
-    //      up to 3 audio clips (atlasRefAudio_*).
+    // Atlas Cloud Seedance uploads.
+    // Atlas submissions work most reliably when the image/video/audio URLs
+    // are Atlas-hosted (no TTL, no query-param escaping, no cross-origin
+    // fetch restrictions). So for Atlas modes we upload each file directly
+    // to Atlas via /model/uploadMedia and use those stable URLs as
+    // image_url / end_image_url / reference_images / reference_videos /
+    // reference_audios. The primary sourceFile is still persisted to
+    // Supabase above so /api/jobs/:id/retry has something to re-submit.
     const atlasReferenceImageUrls: string[] = [];
     const atlasReferenceVideoUrls: string[] = [];
     const atlasReferenceAudioUrls: string[] = [];
-    let atlasEndImageSignedUrl: string | undefined;
+    let atlasStartImageUrl: string | undefined;
+    let atlasEndImageUrl: string | undefined;
 
     if (isAtlasMode(mode)) {
-      if (mode === "video:atlas-seedance-i2v" || mode === "video:atlas-seedance-fast-i2v") {
+      const isAtlasI2V =
+        mode === "video:atlas-seedance-i2v" || mode === "video:atlas-seedance-fast-i2v";
+      const isAtlasR2V =
+        mode === "video:atlas-seedance-r2v" || mode === "video:atlas-seedance-fast-r2v";
+
+      if (isAtlasI2V) {
+        if (!(sourceFile instanceof File) || sourceFile.size === 0) {
+          return fail("Atlas image-to-video requires a start frame image upload.");
+        }
+        try {
+          atlasStartImageUrl = await uploadAtlasMedia(sourceFile, sourceFile.name || "start.png");
+        } catch (error) {
+          const normalized = normalizeProviderError(error);
+          return fail(`Failed to upload start frame to Atlas: ${normalized.message}`, normalized.status);
+        }
         const endImageFile = formData.get("endImageFile");
         if (endImageFile instanceof File && endImageFile.size > 0) {
-          const upload = await saveUploadedInput({ userId: user.id, file: endImageFile });
-          atlasEndImageSignedUrl = upload.signedUrl;
+          try {
+            atlasEndImageUrl = await uploadAtlasMedia(endImageFile, endImageFile.name || "end.png");
+          } catch (error) {
+            const normalized = normalizeProviderError(error);
+            return fail(`Failed to upload end frame to Atlas: ${normalized.message}`, normalized.status);
+          }
         }
       }
-      if (mode === "video:atlas-seedance-r2v" || mode === "video:atlas-seedance-fast-r2v") {
+
+      if (isAtlasR2V) {
         for (const [key, value] of formData.entries()) {
           if (!(value instanceof File) || value.size === 0) continue;
-          if (key.startsWith("atlasRefImage_") && atlasReferenceImageUrls.length < 9) {
-            const upload = await saveUploadedInput({ userId: user.id, file: value });
-            atlasReferenceImageUrls.push(upload.signedUrl);
-          } else if (key.startsWith("atlasRefVideo_") && atlasReferenceVideoUrls.length < 3) {
-            const upload = await saveUploadedInput({ userId: user.id, file: value });
-            atlasReferenceVideoUrls.push(upload.signedUrl);
-          } else if (key.startsWith("atlasRefAudio_") && atlasReferenceAudioUrls.length < 3) {
-            const upload = await saveUploadedInput({ userId: user.id, file: value });
-            atlasReferenceAudioUrls.push(upload.signedUrl);
+          try {
+            if (key.startsWith("atlasRefImage_") && atlasReferenceImageUrls.length < 9) {
+              const url = await uploadAtlasMedia(value, value.name || `ref-image-${atlasReferenceImageUrls.length}.png`);
+              atlasReferenceImageUrls.push(url);
+            } else if (key.startsWith("atlasRefVideo_") && atlasReferenceVideoUrls.length < 3) {
+              const url = await uploadAtlasMedia(value, value.name || `ref-video-${atlasReferenceVideoUrls.length}.mp4`);
+              atlasReferenceVideoUrls.push(url);
+            } else if (key.startsWith("atlasRefAudio_") && atlasReferenceAudioUrls.length < 3) {
+              const url = await uploadAtlasMedia(value, value.name || `ref-audio-${atlasReferenceAudioUrls.length}.wav`);
+              atlasReferenceAudioUrls.push(url);
+            }
+          } catch (error) {
+            const normalized = normalizeProviderError(error);
+            return fail(`Failed to upload reference to Atlas: ${normalized.message}`, normalized.status);
           }
         }
         if (
@@ -273,11 +303,6 @@ export async function POST(request: Request) {
           atlasReferenceAudioUrls.length === 0
         ) {
           return fail("Atlas reference-to-video requires at least one reference image, video, or audio clip.");
-        }
-      }
-      if (mode === "video:atlas-seedance-i2v" || mode === "video:atlas-seedance-fast-i2v") {
-        if (!inputSignedUrl) {
-          return fail("Atlas image-to-video requires a start frame image upload.");
         }
       }
     }
@@ -356,11 +381,8 @@ export async function POST(request: Request) {
         const atlasResult = await startAtlasJob({
           mode,
           prompt,
-          imageUrl:
-            mode === "video:atlas-seedance-i2v" || mode === "video:atlas-seedance-fast-i2v"
-              ? inputSignedUrl
-              : undefined,
-          endImageUrl: atlasEndImageSignedUrl,
+          imageUrl: atlasStartImageUrl,
+          endImageUrl: atlasEndImageUrl,
           imageUrls:
             atlasReferenceImageUrls.length > 0 ? atlasReferenceImageUrls : undefined,
           videoUrls:
