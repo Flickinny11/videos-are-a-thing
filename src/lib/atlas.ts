@@ -135,17 +135,28 @@ export class AtlasError extends Error {
     this.atlasBody = body;
 
     const lowerDetail = detail.toLowerCase();
+    // Only flag as billing when the signal is specific. Bare words like
+    // "exceeded" / "insufficient" / "balance" / 429 match many non-billing
+    // errors (duration exceeded, reference count exceeded, rate limited,
+    // white balance, etc.), so we require an explicit credit/billing
+    // co-occurrence or an HTTP 402.
+    const hasBillingPhrase =
+      lowerDetail.includes("insufficient credit") ||
+      lowerDetail.includes("insufficient balance") ||
+      lowerDetail.includes("insufficient funds") ||
+      lowerDetail.includes("no credits") ||
+      lowerDetail.includes("out of credit") ||
+      lowerDetail.includes("credit exceeded") ||
+      lowerDetail.includes("credit limit") ||
+      lowerDetail.includes("quota exceeded") ||
+      lowerDetail.includes("billing") ||
+      lowerDetail.includes("payment required") ||
+      lowerDetail.includes("subscription");
     this.isBillingError =
       httpStatus === 402 ||
-      httpStatus === 429 ||
       (httpStatus === 401 && lowerDetail.includes("credit")) ||
       (httpStatus === 403 && lowerDetail.includes("credit")) ||
-      lowerDetail.includes("insufficient") ||
-      lowerDetail.includes("no credits") ||
-      lowerDetail.includes("billing") ||
-      lowerDetail.includes("out of credit") ||
-      lowerDetail.includes("exceeded") ||
-      lowerDetail.includes("balance");
+      hasBillingPhrase;
   }
 }
 
@@ -198,6 +209,16 @@ export const startAtlasJob = async (input: AtlasStartRequest): Promise<AtlasRunR
 
   const payload = buildAtlasPayload(input);
 
+  console.log(
+    `[atlas] submit model=${payload.model} ` +
+      `image_url=${payload.image_url ? "set" : "none"} ` +
+      `end_image_url=${payload.end_image_url ? "set" : "none"} ` +
+      `reference_images=${Array.isArray(payload.reference_images) ? (payload.reference_images as unknown[]).length : 0} ` +
+      `reference_videos=${Array.isArray(payload.reference_videos) ? (payload.reference_videos as unknown[]).length : 0} ` +
+      `reference_audios=${Array.isArray(payload.reference_audios) ? (payload.reference_audios as unknown[]).length : 0} ` +
+      `duration=${payload.duration} resolution=${payload.resolution} ratio=${payload.ratio}`,
+  );
+
   const response = await fetch(`${ATLAS_BASE}/model/generateVideo`, {
     method: "POST",
     headers: {
@@ -216,6 +237,9 @@ export const startAtlasJob = async (input: AtlasStartRequest): Promise<AtlasRunR
   }
 
   if (!response.ok) {
+    console.error(
+      `[atlas] generateVideo failed (HTTP ${response.status}) model=${payload.model} body=${JSON.stringify(body)}`,
+    );
     throw new AtlasError(body, response.status);
   }
 
