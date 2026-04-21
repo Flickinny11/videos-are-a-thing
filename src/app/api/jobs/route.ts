@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth";
+import {
+  AtlasError,
+  atlasModelName,
+  isAtlasMode,
+  startAtlasJob,
+  type AtlasRatio,
+  type AtlasResolution,
+} from "@/lib/atlas";
 import { FalError, falModelName, isFalMode, startFalJob } from "@/lib/fal";
 import {
   createGenerationJob,
@@ -22,6 +30,21 @@ const fail = (message: string, status = 400) =>
   );
 
 const normalizeProviderError = (error: unknown): { message: string; status: number } => {
+  if (error instanceof AtlasError) {
+    if (error.isBillingError) {
+      return {
+        message:
+          "Atlas Cloud billing error: insufficient credits or limit reached. " +
+          "Please add credits at https://www.atlascloud.ai/console and try again.",
+        status: 402,
+      };
+    }
+    return {
+      message: `Atlas Cloud request failed (HTTP ${error.httpStatus}): ${error.message}`,
+      status: 502,
+    };
+  }
+
   if (error instanceof FalError) {
     if (error.isBillingError) {
       return {
@@ -98,12 +121,19 @@ export async function POST(request: Request) {
 
     let mode: JobMode;
     if (mediaType === "video") {
-      if (videoProvider === "fal") {
-        mode = "video:fal-i2v";
-      } else if (videoProvider === "fal-i2v-2.7") {
-        mode = "video:fal-i2v-2.7";
-      } else if (videoProvider === "fal-r2v-2.7") {
-        mode = "video:fal-r2v-2.7";
+      const providerToMode: Record<string, JobMode> = {
+        "fal": "video:fal-i2v",
+        "fal-i2v-2.7": "video:fal-i2v-2.7",
+        "fal-r2v-2.7": "video:fal-r2v-2.7",
+        "atlas-seedance-i2v": "video:atlas-seedance-i2v",
+        "atlas-seedance-fast-i2v": "video:atlas-seedance-fast-i2v",
+        "atlas-seedance-r2v": "video:atlas-seedance-r2v",
+        "atlas-seedance-fast-r2v": "video:atlas-seedance-fast-r2v",
+        "atlas-seedance-t2v": "video:atlas-seedance-t2v",
+        "atlas-seedance-fast-t2v": "video:atlas-seedance-fast-t2v",
+      };
+      if (providerToMode[videoProvider]) {
+        mode = providerToMode[videoProvider];
       } else {
         mode = videoMode === "i2v" ? "video:i2v" : "video:t2v";
       }
@@ -130,8 +160,13 @@ export async function POST(request: Request) {
 
     // Modes that don't require the main sourceFile upload:
     // - T2V, R2V (ref images), I2V 2.7 (optional), fal T2I, fal edit (uses editImage fields)
+    // - Atlas R2V (uses ref images), Atlas T2V (text only), Atlas I2V is OPTIONAL here
+    //   because i2v may also be supplied via an image URL later (we still require one
+    //   of start image or video for Atlas i2v below).
     const noSourceFileModes: JobMode[] = [
       "video:t2v", "video:fal-r2v-2.7", "video:fal-i2v-2.7",
+      "video:atlas-seedance-r2v", "video:atlas-seedance-fast-r2v",
+      "video:atlas-seedance-t2v", "video:atlas-seedance-fast-t2v",
       "image:flux-dev", "image:flux-schnell", "image:qwen-t2i",
       "image:fal-t2i-2.7", "image:fal-pro-t2i-2.7",
       "image:fal-edit-2.7", "image:fal-pro-edit-2.7",
@@ -201,6 +236,52 @@ export async function POST(request: Request) {
       }
     }
 
+    // Atlas Cloud Seedance uploads
+    // i2v: optional end frame (endImageFile). sourceFile handled above.
+    // r2v: up to 9 images (atlasRefImage_*), up to 3 videos (atlasRefVideo_*),
+    //      up to 3 audio clips (atlasRefAudio_*).
+    const atlasReferenceImageUrls: string[] = [];
+    const atlasReferenceVideoUrls: string[] = [];
+    const atlasReferenceAudioUrls: string[] = [];
+    let atlasEndImageSignedUrl: string | undefined;
+
+    if (isAtlasMode(mode)) {
+      if (mode === "video:atlas-seedance-i2v" || mode === "video:atlas-seedance-fast-i2v") {
+        const endImageFile = formData.get("endImageFile");
+        if (endImageFile instanceof File && endImageFile.size > 0) {
+          const upload = await saveUploadedInput({ userId: user.id, file: endImageFile });
+          atlasEndImageSignedUrl = upload.signedUrl;
+        }
+      }
+      if (mode === "video:atlas-seedance-r2v" || mode === "video:atlas-seedance-fast-r2v") {
+        for (const [key, value] of formData.entries()) {
+          if (!(value instanceof File) || value.size === 0) continue;
+          if (key.startsWith("atlasRefImage_") && atlasReferenceImageUrls.length < 9) {
+            const upload = await saveUploadedInput({ userId: user.id, file: value });
+            atlasReferenceImageUrls.push(upload.signedUrl);
+          } else if (key.startsWith("atlasRefVideo_") && atlasReferenceVideoUrls.length < 3) {
+            const upload = await saveUploadedInput({ userId: user.id, file: value });
+            atlasReferenceVideoUrls.push(upload.signedUrl);
+          } else if (key.startsWith("atlasRefAudio_") && atlasReferenceAudioUrls.length < 3) {
+            const upload = await saveUploadedInput({ userId: user.id, file: value });
+            atlasReferenceAudioUrls.push(upload.signedUrl);
+          }
+        }
+        if (
+          atlasReferenceImageUrls.length === 0 &&
+          atlasReferenceVideoUrls.length === 0 &&
+          atlasReferenceAudioUrls.length === 0
+        ) {
+          return fail("Atlas reference-to-video requires at least one reference image, video, or audio clip.");
+        }
+      }
+      if (mode === "video:atlas-seedance-i2v" || mode === "video:atlas-seedance-fast-i2v") {
+        if (!inputSignedUrl) {
+          return fail("Atlas image-to-video requires a start frame image upload.");
+        }
+      }
+    }
+
     // Handle fal.ai edit model image uploads (editImage_* fields)
     const editImageUrls: string[] = [];
     if (mode === "image:fal-edit-2.7" || mode === "image:fal-pro-edit-2.7" || mode === "image:fal-seedream-edit-4.5") {
@@ -240,7 +321,69 @@ export async function POST(request: Request) {
       }
     }
 
-    if (isFalMode(mode)) {
+    // Atlas-specific parameters (resolution 480/720p, ratio, audio, watermark).
+    const atlasResolutionRaw = String(formData.get("atlasResolution") || "720p").trim();
+    const atlasResolution: AtlasResolution =
+      atlasResolutionRaw === "480p" || atlasResolutionRaw === "1080p"
+        ? (atlasResolutionRaw as AtlasResolution)
+        : "720p";
+    const atlasRatioRaw = String(formData.get("atlasRatio") || "adaptive").trim();
+    const atlasRatioOptions: AtlasRatio[] = [
+      "adaptive",
+      "21:9",
+      "16:9",
+      "4:3",
+      "1:1",
+      "3:4",
+      "9:16",
+    ];
+    const atlasRatio: AtlasRatio = (atlasRatioOptions as string[]).includes(atlasRatioRaw)
+      ? (atlasRatioRaw as AtlasRatio)
+      : "adaptive";
+    const atlasDurationRaw = Number(formData.get("atlasDuration") || duration);
+    const atlasDuration =
+      atlasDurationRaw === -1
+        ? -1
+        : atlasDurationRaw >= 4 && atlasDurationRaw <= 15
+          ? Math.round(atlasDurationRaw)
+          : 5;
+    const atlasGenerateAudio = formData.get("atlasGenerateAudio") !== "false";
+    const atlasWatermark = formData.get("atlasWatermark") === "true";
+    const atlasReturnLastFrame = formData.get("atlasReturnLastFrame") === "true";
+
+    if (isAtlasMode(mode)) {
+      try {
+        const atlasResult = await startAtlasJob({
+          mode,
+          prompt,
+          imageUrl:
+            mode === "video:atlas-seedance-i2v" || mode === "video:atlas-seedance-fast-i2v"
+              ? inputSignedUrl
+              : undefined,
+          endImageUrl: atlasEndImageSignedUrl,
+          imageUrls:
+            atlasReferenceImageUrls.length > 0 ? atlasReferenceImageUrls : undefined,
+          videoUrls:
+            atlasReferenceVideoUrls.length > 0 ? atlasReferenceVideoUrls : undefined,
+          audioUrls:
+            atlasReferenceAudioUrls.length > 0 ? atlasReferenceAudioUrls : undefined,
+          duration: atlasDuration,
+          resolution: atlasResolution,
+          ratio: atlasRatio,
+          generateAudio: atlasGenerateAudio,
+          watermark: atlasWatermark,
+          returnLastFrame: atlasReturnLastFrame,
+          seed,
+        });
+        providerJobId = atlasResult.predictionId;
+        providerStatus = atlasResult.status;
+        providerRaw = atlasResult.raw;
+        model = atlasModelName(mode);
+      } catch (error) {
+        const normalized = normalizeProviderError(error);
+        return fail(normalized.message, normalized.status);
+      }
+    } else if (isFalMode(mode)) {
       try {
         const falResult = await startFalJob({
           mode,
@@ -303,7 +446,11 @@ export async function POST(request: Request) {
       runpodRaw: providerRaw,
     });
 
-    const providerName = isFalMode(mode) ? "fal.ai" : "RunPod";
+    const providerName = isAtlasMode(mode)
+      ? "Atlas Cloud"
+      : isFalMode(mode)
+        ? "fal.ai"
+        : "RunPod";
     await createJobEvent(
       user.id,
       jobRow.id,

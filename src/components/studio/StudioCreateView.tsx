@@ -8,7 +8,27 @@ import { OglLiquidRibbon } from "@/components/effects/OglLiquidRibbon";
 import { PostFxHalo } from "@/components/effects/PostFxHalo";
 import { RapierFloatField } from "@/components/effects/RapierFloatField";
 
-type VideoProvider = "runpod" | "fal" | "fal-i2v-2.7" | "fal-r2v-2.7";
+type VideoProvider =
+  | "runpod"
+  | "fal"
+  | "fal-i2v-2.7"
+  | "fal-r2v-2.7"
+  | "atlas-seedance-i2v"
+  | "atlas-seedance-fast-i2v"
+  | "atlas-seedance-r2v"
+  | "atlas-seedance-fast-r2v"
+  | "atlas-seedance-t2v"
+  | "atlas-seedance-fast-t2v";
+
+type AtlasResolution = "480p" | "720p" | "1080p";
+type AtlasRatio =
+  | "adaptive"
+  | "21:9"
+  | "16:9"
+  | "4:3"
+  | "1:1"
+  | "3:4"
+  | "9:16";
 
 export function StudioCreateView() {
   const router = useRouter();
@@ -46,7 +66,37 @@ export function StudioCreateView() {
   const [numImages, setNumImages] = useState(1);
   const [maxImages, setMaxImages] = useState(1);
 
+  // Atlas Cloud Seedance extras
+  const [atlasResolution, setAtlasResolution] = useState<AtlasResolution>("720p");
+  const [atlasRatio, setAtlasRatio] = useState<AtlasRatio>("adaptive");
+  const [atlasDuration, setAtlasDuration] = useState<number>(5);
+  const [atlasGenerateAudio, setAtlasGenerateAudio] = useState(true);
+  const [atlasWatermark, setAtlasWatermark] = useState(false);
+  const [atlasReturnLastFrame, setAtlasReturnLastFrame] = useState(false);
+  const [atlasRefImages, setAtlasRefImages] = useState<File[]>([]);
+  const [atlasRefVideos, setAtlasRefVideos] = useState<File[]>([]);
+  const [atlasRefAudios, setAtlasRefAudios] = useState<File[]>([]);
+
   const isFalProvider = videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7";
+
+  const isAtlasProvider =
+    videoProvider === "atlas-seedance-i2v" ||
+    videoProvider === "atlas-seedance-fast-i2v" ||
+    videoProvider === "atlas-seedance-r2v" ||
+    videoProvider === "atlas-seedance-fast-r2v" ||
+    videoProvider === "atlas-seedance-t2v" ||
+    videoProvider === "atlas-seedance-fast-t2v";
+
+  const isAtlasI2V =
+    videoProvider === "atlas-seedance-i2v" || videoProvider === "atlas-seedance-fast-i2v";
+  const isAtlasR2V =
+    videoProvider === "atlas-seedance-r2v" || videoProvider === "atlas-seedance-fast-r2v";
+  const isAtlasT2V =
+    videoProvider === "atlas-seedance-t2v" || videoProvider === "atlas-seedance-fast-t2v";
+  const isAtlasFast =
+    videoProvider === "atlas-seedance-fast-i2v" ||
+    videoProvider === "atlas-seedance-fast-r2v" ||
+    videoProvider === "atlas-seedance-fast-t2v";
 
   const fileRequired = useMemo(
     () => {
@@ -54,6 +104,9 @@ export function StudioCreateView() {
         if (videoProvider === "fal-r2v-2.7") return false; // uses referenceImages instead
         if (videoProvider === "fal-i2v-2.7") return false; // image is optional for 2.7 I2V
         if (videoProvider === "fal") return true;
+        if (isAtlasI2V) return true; // Atlas i2v requires start image
+        if (isAtlasR2V) return false; // uses atlasRefImages / atlasRefVideos
+        if (isAtlasT2V) return false; // text only
         return videoMode === "i2v";
       }
       // T2I models need no file; fal edit models use editImages (multi-upload), not sourceFile
@@ -66,14 +119,15 @@ export function StudioCreateView() {
       if (noSourceFileModels.includes(imageModel)) return false;
       return true;
     },
-    [mediaType, videoMode, videoProvider, imageModel],
+    [mediaType, videoMode, videoProvider, imageModel, isAtlasI2V, isAtlasR2V, isAtlasT2V],
   );
 
   const durationOptions = useMemo(() => {
     if (videoProvider === "fal-r2v-2.7") return [2, 3, 4, 5, 6, 7, 8, 9, 10];
     if (videoProvider === "fal-i2v-2.7") return [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    if (isAtlasProvider) return [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     return [5, 10, 15];
-  }, [videoProvider]);
+  }, [videoProvider, isAtlasProvider]);
 
   const submit = async () => {
     setError("");
@@ -98,7 +152,8 @@ export function StudioCreateView() {
       body.set("mediaType", mediaType);
       body.set("videoMode", videoProvider === "fal" ? "i2v" : videoMode);
       body.set("videoProvider", videoProvider);
-      body.set("duration", String(duration));
+      const effectiveDuration = isAtlasProvider ? atlasDuration : duration;
+      body.set("duration", String(effectiveDuration));
       body.set("resolution", resolution);
       body.set("imageModel", imageModel);
       if (sourceFile) body.set("sourceFile", sourceFile);
@@ -128,6 +183,27 @@ export function StudioCreateView() {
       // Optional seed for all fal.ai Wan video models
       if ((videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7") && seed.trim()) {
         body.set("seed", seed.trim());
+      }
+
+      // Atlas Cloud Seedance extras
+      if (isAtlasProvider) {
+        body.set("atlasResolution", atlasResolution);
+        body.set("atlasRatio", atlasRatio);
+        body.set("atlasDuration", String(atlasDuration));
+        body.set("atlasGenerateAudio", String(atlasGenerateAudio));
+        body.set("atlasWatermark", String(atlasWatermark));
+        body.set("atlasReturnLastFrame", String(atlasReturnLastFrame));
+        if (seed.trim()) body.set("seed", seed.trim());
+
+        if (isAtlasI2V && endImageFile) {
+          body.set("endImageFile", endImageFile);
+        }
+
+        if (isAtlasR2V) {
+          atlasRefImages.forEach((file, i) => body.append(`atlasRefImage_${i}`, file));
+          atlasRefVideos.forEach((file, i) => body.append(`atlasRefVideo_${i}`, file));
+          atlasRefAudios.forEach((file, i) => body.append(`atlasRefAudio_${i}`, file));
+        }
       }
 
       // fal.ai image model extras
@@ -165,6 +241,9 @@ export function StudioCreateView() {
       setReferenceImages([]);
       setReferenceVideos([]);
       setEditImages([]);
+      setAtlasRefImages([]);
+      setAtlasRefVideos([]);
+      setAtlasRefAudios([]);
       setSeed("");
       router.push("/queue");
       router.refresh();
@@ -181,6 +260,12 @@ export function StudioCreateView() {
     { value: "fal", label: "Wan 2.6 fal.ai (I2V)" },
     { value: "fal-i2v-2.7", label: "Wan 2.7 I2V (fal.ai)" },
     { value: "fal-r2v-2.7", label: "Wan 2.7 R2V (fal.ai)" },
+    { value: "atlas-seedance-i2v", label: "Seedance 2.0 I2V (Atlas Cloud)" },
+    { value: "atlas-seedance-fast-i2v", label: "Seedance 2.0 Fast I2V (Atlas Cloud)" },
+    { value: "atlas-seedance-r2v", label: "Seedance 2.0 R2V (Atlas Cloud)" },
+    { value: "atlas-seedance-fast-r2v", label: "Seedance 2.0 Fast R2V (Atlas Cloud)" },
+    { value: "atlas-seedance-t2v", label: "Seedance 2.0 T2V (Atlas Cloud)" },
+    { value: "atlas-seedance-fast-t2v", label: "Seedance 2.0 Fast T2V (Atlas Cloud)" },
   ];
 
   // Button style helper
@@ -288,39 +373,43 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              {/* Duration selector */}
-              <div>
-                <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Duration</label>
-                <div className="flex flex-wrap gap-2">
-                  {durationOptions.map((seconds) => (
-                    <button
-                      key={seconds}
-                      type="button"
-                      className={pill(duration === seconds)}
-                      onClick={() => setDuration(seconds)}
-                    >
-                      {seconds}s
-                    </button>
-                  ))}
+              {/* Duration selector — non-Atlas providers use the regular duration state */}
+              {!isAtlasProvider ? (
+                <div>
+                  <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Duration</label>
+                  <div className="flex flex-wrap gap-2">
+                    {durationOptions.map((seconds) => (
+                      <button
+                        key={seconds}
+                        type="button"
+                        className={pill(duration === seconds)}
+                        onClick={() => setDuration(seconds)}
+                      >
+                        {seconds}s
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              ) : null}
 
-              {/* Resolution selector */}
-              <div>
-                <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Resolution</label>
-                <div className="flex flex-wrap gap-2">
-                  {(["720p", "1080p"] as const).map((res) => (
-                    <button
-                      key={res}
-                      type="button"
-                      className={pill(resolution === res)}
-                      onClick={() => setResolution(res)}
-                    >
-                      {res}
-                    </button>
-                  ))}
+              {/* Resolution selector — non-Atlas (720p/1080p). Atlas has its own (480p/720p). */}
+              {!isAtlasProvider ? (
+                <div>
+                  <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Resolution</label>
+                  <div className="flex flex-wrap gap-2">
+                    {(["720p", "1080p"] as const).map((res) => (
+                      <button
+                        key={res}
+                        type="button"
+                        className={pill(resolution === res)}
+                        onClick={() => setResolution(res)}
+                      >
+                        {res}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              ) : null}
 
               {/* Aspect Ratio - R2V only */}
               {videoProvider === "fal-r2v-2.7" ? (
@@ -381,10 +470,13 @@ export function StudioCreateView() {
               ) : null}
 
               {/* Image upload for I2V modes — 1 start frame (JPEG/PNG/BMP/WEBP, max 20 MB) */}
-              {(videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoMode === "i2v") && videoProvider !== "fal-r2v-2.7" ? (
+              {videoProvider === "fal" ||
+                videoProvider === "fal-i2v-2.7" ||
+                isAtlasI2V ||
+                (videoProvider === "runpod" && videoMode === "i2v") ? (
                 <div>
                   <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">
-                    Start Frame Image {videoProvider === "fal-i2v-2.7" ? "(optional, 1 image)" : ""}
+                    Start Frame Image {videoProvider === "fal-i2v-2.7" ? "(optional, 1 image)" : "(1 image)"}
                   </label>
                   <input
                     type="file"
@@ -394,6 +486,11 @@ export function StudioCreateView() {
                   />
                   {videoProvider === "fal-i2v-2.7" ? (
                     <p className="mt-1 text-xs text-cyan-200/50">JPEG, PNG, BMP, or WEBP — max 20 MB. Mutually exclusive with the video clip below.</p>
+                  ) : null}
+                  {isAtlasI2V ? (
+                    <p className="mt-1 text-xs text-cyan-200/50">
+                      Seedance 2.0 first frame. JPEG, PNG, BMP, or WEBP.
+                    </p>
                   ) : null}
                 </div>
               ) : null}
@@ -505,6 +602,201 @@ export function StudioCreateView() {
                     ) : null}
                   </div>
                 </>
+              ) : null}
+
+              {/* ── Atlas Cloud Seedance 2.0 config panel ── */}
+              {isAtlasProvider ? (
+                <div className="space-y-4 rounded-2xl border border-emerald-300/25 bg-emerald-950/20 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-emerald-100/35 bg-emerald-300/10 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-emerald-100">
+                      Atlas Cloud · Seedance 2.0{isAtlasFast ? " Fast" : ""}
+                    </span>
+                    <span className="text-xs text-emerald-200/70">
+                      ByteDance · {isAtlasFast ? "$0.081/sec" : "$0.10/sec"} · {atlasDuration === -1 ? "auto" : `${atlasDuration}s`} = ${atlasDuration === -1 ? "—" : (atlasDuration * (isAtlasFast ? 0.081 : 0.1)).toFixed(3)}
+                    </span>
+                    <span className="text-[11px] text-emerald-200/60">
+                      Relaxed face/likeness moderation · Native audio
+                    </span>
+                  </div>
+
+                  {/* Duration */}
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-emerald-200/80">Duration</label>
+                    <div className="flex flex-wrap gap-2">
+                      {([4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const).map((seconds) => (
+                        <button
+                          key={seconds}
+                          type="button"
+                          className={pill(atlasDuration === seconds)}
+                          onClick={() => setAtlasDuration(seconds)}
+                        >
+                          {seconds}s
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        className={pill(atlasDuration === -1, "amber")}
+                        onClick={() => setAtlasDuration(-1)}
+                      >
+                        auto
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Resolution (Atlas: 480p | 720p | 1080p) */}
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-emerald-200/80">Resolution</label>
+                    <div className="flex flex-wrap gap-2">
+                      {(["480p", "720p", "1080p"] as const).map((res) => (
+                        <button
+                          key={res}
+                          type="button"
+                          className={pill(atlasResolution === res)}
+                          onClick={() => setAtlasResolution(res)}
+                        >
+                          {res}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-emerald-200/60">480p / 720p / 1080p.</p>
+                  </div>
+
+                  {/* Aspect ratio */}
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-emerald-200/80">Aspect Ratio</label>
+                    <div className="flex flex-wrap gap-2">
+                      {(["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] as const).map((ar) => (
+                        <button
+                          key={ar}
+                          type="button"
+                          className={pill(atlasRatio === ar)}
+                          onClick={() => setAtlasRatio(ar)}
+                        >
+                          {ar}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-emerald-200/60">&quot;adaptive&quot; infers from your source image.</p>
+                  </div>
+
+                  {/* Toggles */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      className={pill(atlasGenerateAudio, "amber")}
+                      onClick={() => setAtlasGenerateAudio(!atlasGenerateAudio)}
+                    >
+                      Generate Audio: {atlasGenerateAudio ? "ON" : "OFF"}
+                    </button>
+                    <button
+                      type="button"
+                      className={pill(atlasWatermark, "amber")}
+                      onClick={() => setAtlasWatermark(!atlasWatermark)}
+                    >
+                      Watermark: {atlasWatermark ? "ON" : "OFF"}
+                    </button>
+                    {isAtlasI2V ? (
+                      <button
+                        type="button"
+                        className={pill(atlasReturnLastFrame, "amber")}
+                        onClick={() => setAtlasReturnLastFrame(!atlasReturnLastFrame)}
+                      >
+                        Return Last Frame: {atlasReturnLastFrame ? "ON" : "OFF"}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {/* End image for Atlas I2V */}
+                  {isAtlasI2V ? (
+                    <div>
+                      <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-emerald-200/80">End Frame Image (optional, 1 image)</label>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/bmp"
+                        className="block w-full rounded-2xl border border-emerald-200/25 bg-slate-900/70 p-3 text-sm"
+                        onChange={(event) => setEndImageFile(event.target.files?.[0] || null)}
+                      />
+                      <p className="mt-1 text-xs text-emerald-200/60">Use start + end to produce a first-and-last-frame-to-video shot.</p>
+                    </div>
+                  ) : null}
+
+                  {/* Reference-to-video: images (up to 9) */}
+                  {isAtlasR2V ? (
+                    <>
+                      <div>
+                        <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-emerald-200/80">Reference Images (up to 9)</label>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="block w-full rounded-2xl border border-emerald-200/25 bg-slate-900/70 p-3 text-sm"
+                          onChange={(event) => {
+                            const files = event.target.files;
+                            if (files) setAtlasRefImages(Array.from(files).slice(0, 9));
+                          }}
+                        />
+                        <p className="mt-1 text-xs text-emerald-200/60">
+                          Use multiple reference images for multi-image/character consistency. Max 9 images.
+                        </p>
+                        {atlasRefImages.length > 0 ? (
+                          <p className="mt-1 text-xs text-emerald-300/70">{atlasRefImages.length} image(s) selected</p>
+                        ) : null}
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-emerald-200/80">Reference Videos (up to 3, ≤15s total)</label>
+                        <input
+                          type="file"
+                          accept="video/*"
+                          multiple
+                          className="block w-full rounded-2xl border border-emerald-200/25 bg-slate-900/70 p-3 text-sm"
+                          onChange={(event) => {
+                            const files = event.target.files;
+                            if (files) setAtlasRefVideos(Array.from(files).slice(0, 3));
+                          }}
+                        />
+                        <p className="mt-1 text-xs text-emerald-200/60">Use for video editing/extension.</p>
+                        {atlasRefVideos.length > 0 ? (
+                          <p className="mt-1 text-xs text-emerald-300/70">{atlasRefVideos.length} video(s) selected</p>
+                        ) : null}
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-emerald-200/80">Reference Audio (up to 3, ≤15s total)</label>
+                        <input
+                          type="file"
+                          accept="audio/*"
+                          multiple
+                          className="block w-full rounded-2xl border border-emerald-200/25 bg-slate-900/70 p-3 text-sm"
+                          onChange={(event) => {
+                            const files = event.target.files;
+                            if (files) setAtlasRefAudios(Array.from(files).slice(0, 3));
+                          }}
+                        />
+                        <p className="mt-1 text-xs text-emerald-200/60">Drives audio/lip-sync.</p>
+                        {atlasRefAudios.length > 0 ? (
+                          <p className="mt-1 text-xs text-emerald-300/70">{atlasRefAudios.length} audio clip(s) selected</p>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : null}
+
+                  {/* Seed for Atlas */}
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-emerald-200/80">Seed (optional)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={2147483647}
+                      step={1}
+                      placeholder="Leave blank for random"
+                      value={seed}
+                      onChange={(event) => setSeed(event.target.value)}
+                      className="block w-full rounded-2xl border border-emerald-200/25 bg-slate-900/70 p-3 text-sm"
+                    />
+                    <p className="mt-1 text-xs text-emerald-200/60">Integer 0-2147483647 for reproducible results.</p>
+                  </div>
+                </div>
               ) : null}
             </div>
           ) : (
@@ -786,9 +1078,10 @@ export function StudioCreateView() {
           </EffectsErrorBoundary>
         </div>
         <div className="mt-4 space-y-3 text-xs text-cyan-100/75">
-          <p>Video: WAN 2.6 T2V/I2V (RunPod) + WAN 2.6 I2V + WAN 2.7 I2V (2-15s) + WAN 2.7 R2V (2-10s) on fal.ai</p>
+          <p>Video: WAN 2.6 T2V/I2V (RunPod) + WAN 2.6/2.7 on fal.ai + Seedance 2.0 (Atlas Cloud)</p>
+          <p>Seedance 2.0 on Atlas Cloud: I2V, R2V (up to 9 images / 3 videos / 3 audio clips), T2V — plus Fast variants.</p>
           <p>Image: Wan 2.7 T2I/Edit/Pro (fal.ai) + Qwen + Flux + more</p>
-          <p>Safety filter disabled on all Wan 2.7 models. Uploads are private signed URLs; outputs re-hosted to storage.</p>
+          <p>Atlas Cloud backend supports realistic faces (relaxed moderation). Uploads are private signed URLs; outputs are re-hosted to Supabase storage before expiring.</p>
         </div>
       </article>
     </section>

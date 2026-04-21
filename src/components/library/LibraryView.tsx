@@ -67,7 +67,6 @@ export function LibraryView() {
       if (!current.length) return incoming;
 
       const currentMap = new Map(current.map((item) => [item.id, item]));
-      const incomingIds = new Set(incoming.map((item) => item.id));
 
       // Check if anything actually changed
       if (

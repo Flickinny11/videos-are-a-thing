@@ -23,7 +23,6 @@ export class EffectsErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: unknown) {
-    // eslint-disable-next-line no-console
     console.warn("[EffectsErrorBoundary] A visual effect crashed and was disabled:", error);
   }
 

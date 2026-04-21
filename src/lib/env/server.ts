@@ -13,4 +13,6 @@ export const envServer = {
   supabaseProjectRef: required("SUPABASE_PROJECT_REF"),
   runpodApiKey: required("RUNPOD_API_KEY"),
   falKey: process.env.FAL_KEY || "",
+  atlasCloudApiKey:
+    process.env.ATLAS_CLOUD_API_KEY || process.env.ATLASCLOUD_API_KEY || "",
 };
