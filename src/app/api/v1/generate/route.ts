@@ -17,16 +17,8 @@ const fail = (message: string, status = 400) =>
 
 const normalizeProviderError = (error: unknown): { message: string; status: number } => {
   if (error instanceof AtlasError) {
-    if (error.isBillingError) {
-      return {
-        message:
-          `Atlas Cloud billing error: ${error.message}. ` +
-          "Add credits at https://www.atlascloud.ai/console and try again.",
-        status: 402,
-      };
-    }
     return {
-      message: `Atlas Cloud request failed (HTTP ${error.httpStatus}): ${error.message}`,
+      message: `Atlas Cloud (HTTP ${error.httpStatus}): ${error.message}`,
       status: error.httpStatus >= 400 && error.httpStatus < 500 ? error.httpStatus : 502,
     };
   }

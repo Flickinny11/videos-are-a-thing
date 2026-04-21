@@ -186,20 +186,20 @@ const buildAtlasPayload = (input: AtlasStartRequest): Record<string, unknown> =>
   const isImageToVideo = input.mode.endsWith("i2v");
 
   if (isReference) {
-    // Atlas Seedance 2.0 reference-to-video expects all three reference
-    // arrays present in the body, even when empty (per the Python example
-    // in Atlas's own docs). Omitting them appears to trip a server-side
-    // validation path that can surface as a misleading "insufficient
-    // credits" error.
+    // Atlas Seedance 2.0 R2V expects all three reference arrays present
+    // in the body, even when empty (per Atlas's own Python example).
+    // Omitting them trips a server-side validation path that can surface
+    // as a misleading "insufficient credits" error.
     payload.reference_images = (input.imageUrls ?? []).slice(0, 9);
     payload.reference_videos = (input.videoUrls ?? []).slice(0, 3);
     payload.reference_audios = (input.audioUrls ?? []).slice(0, 3);
   } else if (isImageToVideo) {
-    // Atlas Seedance 2.0 I2V uses `image_url`. Don't also send `image` —
-    // that's a different (v1.5-pro) endpoint's field and risks confusing
-    // the server's validator.
-    if (input.imageUrl) payload.image_url = input.imageUrl;
-    if (input.endImageUrl) payload.end_image_url = input.endImageUrl;
+    // Atlas Seedance 2.0 I2V uses `image_url`. Always include
+    // `end_image_url` (null when unused) to match Atlas's documented
+    // payload shape — omitting optional URL fields can similarly trip
+    // the validator.
+    payload.image_url = input.imageUrl ?? null;
+    payload.end_image_url = input.endImageUrl ?? null;
   }
 
   return payload;
