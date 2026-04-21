@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth";
+import { AtlasError, atlasModelName, isAtlasMode, startAtlasJob } from "@/lib/atlas";
 import { FalError, falModelName, isFalMode, startFalJob } from "@/lib/fal";
 import {
   createGenerationJob,
@@ -15,6 +16,20 @@ const fail = (message: string, status = 400) =>
   NextResponse.json({ success: false, message }, { status });
 
 const normalizeProviderError = (error: unknown): { message: string; status: number } => {
+  if (error instanceof AtlasError) {
+    if (error.isBillingError) {
+      return {
+        message:
+          "Atlas Cloud billing error: insufficient credits or limit reached. " +
+          "Please add credits at https://www.atlascloud.ai/console and try again.",
+        status: 402,
+      };
+    }
+    return {
+      message: `Atlas Cloud request failed (HTTP ${error.httpStatus}): ${error.message}`,
+      status: 502,
+    };
+  }
   if (error instanceof FalError) {
     if (error.isBillingError) {
       return {
@@ -104,6 +119,9 @@ export async function POST(request: Request) {
     const validModes: JobMode[] = [
       "video:t2v", "video:i2v", "video:fal-i2v",
       "video:fal-i2v-2.7", "video:fal-r2v-2.7",
+      "video:atlas-seedance-i2v", "video:atlas-seedance-fast-i2v",
+      "video:atlas-seedance-r2v", "video:atlas-seedance-fast-r2v",
+      "video:atlas-seedance-t2v", "video:atlas-seedance-fast-t2v",
       "image:flux", "image:flux-dev", "image:flux-schnell",
       "image:qwen-t2i", "image:qwen", "image:qwen-2511",
       "image:p-edit", "image:seedream-edit", "image:nano-banana", "image:z-turbo",
@@ -120,6 +138,8 @@ export async function POST(request: Request) {
 
     const noSourceFileModes: JobMode[] = [
       "video:t2v", "video:fal-r2v-2.7", "video:fal-i2v-2.7",
+      "video:atlas-seedance-r2v", "video:atlas-seedance-fast-r2v",
+      "video:atlas-seedance-t2v", "video:atlas-seedance-fast-t2v",
       "image:flux-dev", "image:flux-schnell", "image:qwen-t2i",
       "image:fal-t2i-2.7", "image:fal-pro-t2i-2.7",
       "image:fal-edit-2.7", "image:fal-pro-edit-2.7",
@@ -146,7 +166,26 @@ export async function POST(request: Request) {
     let providerRaw: Record<string, unknown>;
     let model: string;
 
-    if (isFalMode(mode)) {
+    if (isAtlasMode(mode)) {
+      try {
+        const atlasResult = await startAtlasJob({
+          mode,
+          prompt,
+          imageUrl:
+            mode === "video:atlas-seedance-i2v" || mode === "video:atlas-seedance-fast-i2v"
+              ? inputSignedUrl
+              : undefined,
+          duration,
+        });
+        providerJobId = atlasResult.predictionId;
+        providerStatus = atlasResult.status;
+        providerRaw = atlasResult.raw;
+        model = atlasModelName(mode);
+      } catch (error) {
+        const normalized = normalizeProviderError(error);
+        return fail(normalized.message, normalized.status);
+      }
+    } else if (isFalMode(mode)) {
       try {
         const falResult = await startFalJob({
           mode,
@@ -196,7 +235,11 @@ export async function POST(request: Request) {
       runpodRaw: providerRaw,
     });
 
-    const providerName = isFalMode(mode) ? "fal.ai" : "RunPod";
+    const providerName = isAtlasMode(mode)
+      ? "Atlas Cloud"
+      : isFalMode(mode)
+        ? "fal.ai"
+        : "RunPod";
     await createJobEvent(
       user.id,
       jobRow.id,

@@ -9,6 +9,12 @@ const MODEL_ENDPOINT_BY_MODE: Record<JobMode, string> = {
   "video:fal-i2v": "wan-v2.6-fal-i2v", // routed through fal.ai, not RunPod
   "video:fal-i2v-2.7": "wan-v2.7-fal-i2v", // routed through fal.ai, not RunPod
   "video:fal-r2v-2.7": "wan-v2.7-fal-r2v", // routed through fal.ai, not RunPod
+  "video:atlas-seedance-i2v": "seedance-2.0-atlas-i2v", // routed through Atlas Cloud, not RunPod
+  "video:atlas-seedance-fast-i2v": "seedance-2.0-fast-atlas-i2v", // routed through Atlas Cloud, not RunPod
+  "video:atlas-seedance-r2v": "seedance-2.0-atlas-r2v", // routed through Atlas Cloud, not RunPod
+  "video:atlas-seedance-fast-r2v": "seedance-2.0-fast-atlas-r2v", // routed through Atlas Cloud, not RunPod
+  "video:atlas-seedance-t2v": "seedance-2.0-atlas-t2v", // routed through Atlas Cloud, not RunPod
+  "video:atlas-seedance-fast-t2v": "seedance-2.0-fast-atlas-t2v", // routed through Atlas Cloud, not RunPod
   "image:flux": "black-forest-labs-flux-1-kontext-dev",
   "image:flux-dev": "black-forest-labs-flux-1-dev",
   "image:flux-schnell": "black-forest-labs-flux-1-schnell",

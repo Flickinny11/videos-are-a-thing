@@ -126,7 +126,7 @@ export function QueueView() {
 
     pollTimerRef.current = window.setTimeout(tick, getPollInterval());
     return () => window.clearTimeout(pollTimerRef.current);
-  }, [hasActive, pollActiveJobs]);
+  }, [hasActive, activeJobs, pollActiveJobs]);
 
   return (
     <section className="space-y-6">

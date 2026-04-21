@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth";
+import { atlasMediaKind, getAtlasJobStatus, isAtlasMode } from "@/lib/atlas";
 import { falMediaKind, getFalJobStatus, isFalMode } from "@/lib/fal";
 import {
   createJobEvent,
@@ -88,7 +89,110 @@ export async function POST(
 
     // Branch polling based on provider
     let updated;
-    if (isFalMode(current.mode)) {
+    if (isAtlasMode(current.mode)) {
+      // ── Atlas Cloud polling ──
+      let atlasStatus;
+      try {
+        atlasStatus = await getAtlasJobStatus(current.mode, current.runpod_job_id);
+      } catch (error) {
+        const parsed = parsePollError(error);
+
+        if (isTerminalRunpodPollError(parsed)) {
+          const failedUpdate = await updateJobStatus({
+            jobId: current.id,
+            status: "FAILED",
+            progressPercent: null,
+            delayTimeMs: current.delay_time_ms,
+            executionTimeMs: current.execution_time_ms,
+            errorReason: parsed.message,
+            runpodRaw: parsed.raw,
+          });
+
+          if (current.status !== "FAILED" || current.error_reason !== parsed.message) {
+            await createJobEvent(user.id, current.id, "FAILED", `Atlas Cloud polling failed: ${parsed.message}`, parsed.raw);
+          }
+
+          return NextResponse.json({ success: true, job: mapJobRowToResponse(failedUpdate) });
+        }
+
+        throw error;
+      }
+
+      updated = await updateJobStatus({
+        jobId: current.id,
+        status: atlasStatus.status,
+        progressPercent: atlasStatus.progress,
+        delayTimeMs: current.delay_time_ms,
+        executionTimeMs: current.execution_time_ms,
+        errorReason: atlasStatus.error,
+        runpodRaw: atlasStatus.raw,
+      });
+
+      if (updated.status !== current.status) {
+        await createJobEvent(
+          user.id, current.id, updated.status,
+          atlasStatus.error || `Atlas Cloud status updated to ${updated.status}.`,
+          atlasStatus.raw,
+        );
+      }
+
+      if (updated.status === "COMPLETED" && !updated.output_media_id) {
+        const mediaUrl = atlasStatus.mediaUrl;
+        const kind = atlasMediaKind(current.mode);
+        if (!mediaUrl) {
+          updated = await updateJobStatus({
+            jobId: current.id,
+            status: "FAILED",
+            progressPercent: null,
+            delayTimeMs: current.delay_time_ms,
+            executionTimeMs: current.execution_time_ms,
+            errorReason: `Atlas Cloud completed but no downloadable ${kind} URL was found.`,
+            runpodRaw: atlasStatus.raw,
+          });
+        } else {
+          const persisted = await persistRemoteMediaToStorage({
+            userId: user.id,
+            jobId: current.id,
+            remoteUrl: mediaUrl,
+            kind,
+          });
+
+          const media = await createMediaAsset({
+            userId: user.id,
+            jobId: current.id,
+            kind,
+            storagePath: persisted.path,
+            mimeType: persisted.mimeType,
+            sizeBytes: persisted.sizeBytes,
+            prompt: updated.prompt,
+            model: updated.model,
+            meta: {
+              sourceUrl: mediaUrl,
+              atlasPredictionId: updated.runpod_job_id,
+              hasNsfwContents: atlasStatus.hasNsfw,
+              provider: "atlas-cloud",
+            },
+          });
+
+          updated = await updateJobStatus({
+            jobId: current.id,
+            status: "COMPLETED",
+            progressPercent: 100,
+            delayTimeMs: current.delay_time_ms,
+            executionTimeMs: current.execution_time_ms,
+            errorReason: null,
+            runpodRaw: atlasStatus.raw,
+            outputMediaId: media.id,
+          });
+
+          await createJobEvent(
+            user.id, current.id, "COMPLETED",
+            "Media downloaded from Atlas Cloud and saved to Supabase storage.",
+            atlasStatus.raw,
+          );
+        }
+      }
+    } else if (isFalMode(current.mode)) {
       // ── fal.ai polling ──
       let falStatus;
       try {

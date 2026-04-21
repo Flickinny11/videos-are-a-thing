@@ -72,8 +72,8 @@ export function InteractiveButton({
         ripple.style.transform = "scale(0)";
         ripple.style.opacity = "1";
 
-        // Force reflow then animate
-        ripple.offsetHeight;
+        // Force reflow then animate (reading offsetHeight triggers layout).
+        void ripple.offsetHeight;
         ripple.style.transition = "transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.5s ease-out";
         ripple.style.transform = "scale(1)";
         ripple.style.opacity = "0";

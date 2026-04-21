@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { ReactNode, useEffect, useState } from "react";
 
 import { EffectsErrorBoundary } from "@/components/app/EffectsErrorBoundary";
@@ -12,28 +13,35 @@ interface Props {
   children: ReactNode;
 }
 
+// Lazy, client-only, per-effect dynamic imports so a single broken
+// module never blocks the app shell from rendering. Each is still
+// individually wrapped in an EffectsErrorBoundary below.
+const OglNebulaBackground = dynamic(
+  () => import("@/components/effects/OglNebulaBackground").then((m) => m.OglNebulaBackground),
+  { ssr: false },
+);
+const CurtainsLayer = dynamic(
+  () => import("@/components/effects/CurtainsLayer").then((m) => m.CurtainsLayer),
+  { ssr: false },
+);
+const LenisProvider = dynamic(
+  () => import("@/components/effects/LenisProvider").then((m) => m.LenisProvider),
+  { ssr: false },
+);
+
 /**
- * Lazily loads heavy WebGL effect components so that a failure in any
- * of them never takes down the page. Each effect is individually
- * wrapped in an EffectsErrorBoundary.
+ * Defers heavy WebGL effect mounting until after first paint and
+ * isolates each effect behind its own error boundary.
  */
 function EffectsLayer() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    // Defer effect initialisation to after first paint so the main
-    // content is visible before WebGL contexts spin up.
     const id = requestAnimationFrame(() => setMounted(true));
     return () => cancelAnimationFrame(id);
   }, []);
 
   if (!mounted) return null;
-
-  // Dynamic imports so a single broken effect can't prevent the
-  // module from loading at all.
-  const OglNebulaBackground = require("@/components/effects/OglNebulaBackground").OglNebulaBackground;
-  const CurtainsLayer = require("@/components/effects/CurtainsLayer").CurtainsLayer;
-  const LenisProvider = require("@/components/effects/LenisProvider").LenisProvider;
 
   return (
     <>
