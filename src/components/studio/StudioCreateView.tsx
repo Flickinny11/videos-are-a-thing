@@ -480,7 +480,7 @@ export function StudioCreateView() {
                   </label>
                   <input
                     type="file"
-                    accept="image/png,image/jpeg,image/webp,image/bmp"
+                    accept="image/png,image/jpeg,image/webp,image/bmp,.png,.jpg,.jpeg,.webp,.bmp"
                     className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
                     onChange={(event) => setSourceFile(event.target.files?.[0] || null)}
                   />
@@ -501,7 +501,7 @@ export function StudioCreateView() {
                   <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">End Frame Image (optional, 1 image)</label>
                   <input
                     type="file"
-                    accept="image/png,image/jpeg,image/webp,image/bmp"
+                    accept="image/png,image/jpeg,image/webp,image/bmp,.png,.jpg,.jpeg,.webp,.bmp"
                     className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
                     onChange={(event) => setEndImageFile(event.target.files?.[0] || null)}
                   />
@@ -712,7 +712,7 @@ export function StudioCreateView() {
                       <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-emerald-200/80">End Frame Image (optional, 1 image)</label>
                       <input
                         type="file"
-                        accept="image/png,image/jpeg,image/webp,image/bmp"
+                        accept="image/png,image/jpeg,image/webp,image/bmp,.png,.jpg,.jpeg,.webp,.bmp"
                         className="block w-full rounded-2xl border border-emerald-200/25 bg-slate-900/70 p-3 text-sm"
                         onChange={(event) => setEndImageFile(event.target.files?.[0] || null)}
                       />

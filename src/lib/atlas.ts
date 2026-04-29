@@ -390,8 +390,38 @@ export const uploadAtlasMedia = async (file: Blob, filename = "upload.bin"): Pro
   if (!envServer.atlasCloudApiKey) {
     throw new AtlasError({ error: "ATLAS_CLOUD_API_KEY is not configured." }, 401);
   }
+  // If the blob has no/generic content type, re-wrap it with a type derived
+  // from the filename extension. Atlas's uploadMedia uses the multipart Content-Type
+  // to validate the asset and rejects "application/octet-stream" for images.
+  const ext = (filename.split(".").pop() || "").toLowerCase();
+  const declared = (file.type || "").toLowerCase();
+  const needsRewrap =
+    !declared ||
+    declared === "application/octet-stream" ||
+    declared === "binary/octet-stream" ||
+    declared === "image/jpg" ||
+    declared === "image/x-png";
+  const inferred =
+    ext === "png" ? "image/png" :
+    ext === "jpg" || ext === "jpeg" || ext === "jpe" || ext === "jfif" ? "image/jpeg" :
+    ext === "webp" ? "image/webp" :
+    ext === "bmp" ? "image/bmp" :
+    ext === "gif" ? "image/gif" :
+    ext === "heic" ? "image/heic" :
+    ext === "heif" ? "image/heif" :
+    ext === "avif" ? "image/avif" :
+    ext === "tif" || ext === "tiff" ? "image/tiff" :
+    ext === "mp4" ? "video/mp4" :
+    ext === "mov" ? "video/quicktime" :
+    ext === "webm" ? "video/webm" :
+    ext === "wav" ? "audio/wav" :
+    ext === "mp3" ? "audio/mpeg" :
+    "";
+  const upload = needsRewrap && inferred
+    ? new Blob([await file.arrayBuffer()], { type: inferred })
+    : file;
   const fd = new FormData();
-  fd.append("file", file, filename);
+  fd.append("file", upload, filename);
   const response = await fetch(`${ATLAS_BASE}/model/uploadMedia`, {
     method: "POST",
     headers: { Authorization: atlasAuth() },
