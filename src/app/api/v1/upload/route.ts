@@ -29,6 +29,33 @@ const inferCategory = (ext: string): string => {
   return "other";
 };
 
+const EXT_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  gif: "image/gif",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  svg: "image/svg+xml",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+  m4v: "video/x-m4v",
+  avi: "video/x-msvideo",
+  mkv: "video/x-matroska",
+};
+
+const resolveContentType = (declared: string, ext: string): string => {
+  const t = (declared || "").trim().toLowerCase();
+  if (t && t !== "application/octet-stream" && t !== "binary/octet-stream") {
+    if (t === "image/jpg" || t === "image/x-png") return EXT_MIME[ext] || "image/png";
+    return t;
+  }
+  return EXT_MIME[ext] || "application/octet-stream";
+};
+
 /**
  * POST /api/v1/upload
  *
@@ -66,11 +93,12 @@ export async function POST(request: Request) {
     const path = `${user.id}/${category}/${filename}`;
 
     const bytes = Buffer.from(await file.arrayBuffer());
+    const contentType = resolveContentType(file.type, extension);
     const { error: uploadError } = await supabaseService.storage
       .from(BUCKET)
       .upload(path, bytes, {
         upsert: false,
-        contentType: file.type || "application/octet-stream",
+        contentType,
       });
 
     if (uploadError) {
@@ -99,7 +127,7 @@ export async function POST(request: Request) {
         extension,
         originalName: file.name,
         sizeBytes: bytes.byteLength,
-        mimeType: file.type || "application/octet-stream",
+        mimeType: contentType,
         signedUrl: signed.data.signedUrl,
         expiresInSeconds: 3600,
       },

@@ -3,6 +3,50 @@ import { nanoid } from "nanoid";
 import { supabaseService } from "@/lib/supabase/service";
 import type { JobMode, JobRecord, JobResponse, JobStatus, LibraryItem, MediaKind, MediaRecord } from "@/types/app";
 
+const EXT_TO_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  jpe: "image/jpeg",
+  jfif: "image/jpeg",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  gif: "image/gif",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  heic: "image/heic",
+  heif: "image/heif",
+  avif: "image/avif",
+  svg: "image/svg+xml",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  m4v: "video/x-m4v",
+  webm: "video/webm",
+  mkv: "video/x-matroska",
+  avi: "video/x-msvideo",
+  wav: "audio/wav",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  ogg: "audio/ogg",
+  flac: "audio/flac",
+  aac: "audio/aac",
+};
+
+const inferContentType = (file: { type?: string }, extension: string): string => {
+  const declared = (file.type || "").trim().toLowerCase();
+  // Trust the file's declared type when it's a real, specific MIME — but
+  // ignore generic/empty values that block downstream providers (fal.ai,
+  // Atlas Cloud) from accepting the signed URL.
+  if (declared && declared !== "application/octet-stream" && declared !== "binary/octet-stream") {
+    // Normalize a couple of legacy aliases.
+    if (declared === "image/jpg" || declared === "image/x-png") {
+      return EXT_TO_MIME[extension] || "image/png";
+    }
+    return declared;
+  }
+  return EXT_TO_MIME[extension] || "application/octet-stream";
+};
+
 export const mapJobRowToResponse = (row: JobRecord): JobResponse => ({
   id: row.id,
   status: row.status,
@@ -164,16 +208,17 @@ export const saveUploadedInput = async (input: {
   userId: string;
   file: File;
 }) => {
-  const extension = input.file.name.split(".").pop() || "bin";
+  const extension = (input.file.name.split(".").pop() || "bin").toLowerCase();
   const filename = `${Date.now()}-${nanoid(8)}.${extension}`;
   const path = `${input.userId}/${filename}`;
 
   const bytes = Buffer.from(await input.file.arrayBuffer());
+  const contentType = inferContentType(input.file, extension);
   const { error } = await supabaseService.storage
     .from("inputs-private")
     .upload(path, bytes, {
       upsert: false,
-      contentType: input.file.type || "application/octet-stream",
+      contentType,
     });
 
   if (error) throw new Error(error.message);
