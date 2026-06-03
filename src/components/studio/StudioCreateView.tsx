@@ -229,7 +229,10 @@ export function StudioCreateView() {
         const data = await res.json().catch(() => null);
         if (!mountedRef.current || !res.ok || !data?.success) return;
         const jobs = (data.jobs as JobResponse[]) || [];
-        upsertJobs(jobs.filter((j) => isActiveJob(j.status)));
+        // /api/jobs is newest-first. Only surface the few most recent in-flight
+        // requests — not every historical job still stuck IN_QUEUE — so the
+        // tracker stays a compact status strip instead of flooding the page.
+        upsertJobs(jobs.filter((j) => isActiveJob(j.status)).slice(0, 5));
       } catch {
         /* non-fatal: tracker simply starts empty */
       }
