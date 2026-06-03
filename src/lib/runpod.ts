@@ -10,6 +10,17 @@ const MODEL_ENDPOINT_BY_MODE: Record<JobMode, string> = {
   "video:fal-i2v-2.7": "wan-v2.7-fal-i2v", // routed through fal.ai, not RunPod
   "video:fal-r2v-2.7": "wan-v2.7-fal-r2v", // routed through fal.ai, not RunPod
   "video:fal-cosmos3-i2v": "cosmos-3-super-fal-i2v", // routed through fal.ai, not RunPod
+  // LTX-2.3 family — routed through fal.ai, not RunPod
+  "video:ltx-t2v": "ltx-2.3-t2v",
+  "video:ltx-t2v-fast": "ltx-2.3-t2v-fast",
+  "video:ltx-i2v": "ltx-2.3-i2v",
+  "video:ltx-i2v-fast": "ltx-2.3-i2v-fast",
+  "video:ltx-a2v": "ltx-2.3-a2v",
+  "video:ltx-extend": "ltx-2.3-extend",
+  "video:ltx-retake": "ltx-2.3-retake",
+  "video:ltx-q-t2v": "ltx-2.3-quality-t2v",
+  "video:ltx-q-i2v": "ltx-2.3-quality-i2v",
+  "video:ltx-q-a2v": "ltx-2.3-quality-a2v",
   "video:atlas-seedance-i2v": "seedance-2.0-atlas-i2v", // routed through Atlas Cloud, not RunPod
   "video:atlas-seedance-fast-i2v": "seedance-2.0-fast-atlas-i2v", // routed through Atlas Cloud, not RunPod
   "video:atlas-seedance-r2v": "seedance-2.0-atlas-r2v", // routed through Atlas Cloud, not RunPod

@@ -8,6 +8,7 @@ import { PostFxHalo } from "@/components/effects/PostFxHalo";
 import { PremiumProgressBar } from "@/components/effects/PremiumProgressBar";
 import { RapierFloatField } from "@/components/effects/RapierFloatField";
 import { getRealtimeProgressPercent, isActiveJob } from "@/lib/job-progress";
+import { LTX_MODELS, type LtxControl } from "@/lib/ltx";
 import type { JobResponse } from "@/types/app";
 
 /** First few words of a prompt, for the in-progress request chips. */
@@ -24,12 +25,25 @@ type VideoProvider =
   | "fal-i2v-2.7"
   | "fal-r2v-2.7"
   | "fal-cosmos3-i2v"
+  | "ltx-t2v"
+  | "ltx-t2v-fast"
+  | "ltx-i2v"
+  | "ltx-i2v-fast"
+  | "ltx-a2v"
+  | "ltx-extend"
+  | "ltx-retake"
+  | "ltx-q-t2v"
+  | "ltx-q-i2v"
+  | "ltx-q-a2v"
   | "atlas-seedance-i2v"
   | "atlas-seedance-fast-i2v"
   | "atlas-seedance-r2v"
   | "atlas-seedance-fast-r2v"
   | "atlas-seedance-t2v"
   | "atlas-seedance-fast-t2v";
+
+/** map a videoProvider value to its JobMode key for LTX (e.g. "ltx-t2v" → "video:ltx-t2v"). */
+const ltxModeForProvider = (provider: string): string => `video:${provider}`;
 
 type AtlasResolution = "480p" | "720p" | "1080p";
 type AtlasRatio =
@@ -100,6 +114,10 @@ export function StudioCreateView() {
   const [cosmosAgenticSamples, setCosmosAgenticSamples] = useState<number>(2);
   const [cosmosAgenticEarlyStop, setCosmosAgenticEarlyStop] = useState(true);
 
+  // ── LTX-2.3 (descriptor-driven) ──
+  const [ltxValues, setLtxValues] = useState<Record<string, string | boolean>>({});
+  const [ltxFiles, setLtxFiles] = useState<Record<string, File | null>>({});
+
   // ── In-progress request tracker (so the user can stay on Studio and fire
   //    multiple generations back-to-back while watching their status). ──
   const [trackedJobs, setTrackedJobs] = useState<JobResponse[]>([]);
@@ -123,6 +141,19 @@ export function StudioCreateView() {
   const [atlasRefAudios, setAtlasRefAudios] = useState<File[]>([]);
 
   const isCosmosProvider = videoProvider === "fal-cosmos3-i2v";
+  const isLtxProvider = videoProvider.startsWith("ltx-");
+  const ltxModel = isLtxProvider ? LTX_MODELS[ltxModeForProvider(videoProvider)] : undefined;
+
+  // Initialize LTX control values to the selected model's defaults; reset files.
+  useEffect(() => {
+    if (!ltxModel) return;
+    const defaults: Record<string, string | boolean> = {};
+    for (const c of ltxModel.controls) {
+      defaults[c.key] = typeof c.default === "boolean" ? c.default : String(c.default);
+    }
+    setLtxValues(defaults);
+    setLtxFiles({});
+  }, [ltxModel]);
   const isFalProvider =
     videoProvider === "fal" ||
     videoProvider === "fal-i2v-2.7" ||
@@ -151,6 +182,7 @@ export function StudioCreateView() {
   const fileRequired = useMemo(
     () => {
       if (mediaType === "video") {
+        if (videoProvider.startsWith("ltx-")) return false; // LTX uses its own ltxfile_* inputs
         if (videoProvider === "fal-r2v-2.7") return false; // uses referenceImages instead
         if (videoProvider === "fal-i2v-2.7") return false; // image is optional for 2.7 I2V
         if (videoProvider === "fal-cosmos3-i2v") return true; // conditioning first frame required
@@ -275,14 +307,25 @@ export function StudioCreateView() {
     setError("");
     setFlash("");
 
-    if (!prompt.trim()) {
-      setError("Prompt is required.");
-      return;
-    }
-
-    if (fileRequired && !sourceFile) {
-      setError("Please upload an input image.");
-      return;
+    if (isLtxProvider && ltxModel) {
+      if (ltxModel.promptRequired && !prompt.trim()) {
+        setError(`A prompt is required for ${ltxModel.label}.`);
+        return;
+      }
+      const missing = ltxModel.files.find((f) => f.required && !ltxFiles[f.key]);
+      if (missing) {
+        setError(`${missing.label} is required for ${ltxModel.label}.`);
+        return;
+      }
+    } else {
+      if (!prompt.trim()) {
+        setError("Prompt is required.");
+        return;
+      }
+      if (fileRequired && !sourceFile) {
+        setError("Please upload an input image.");
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -342,6 +385,18 @@ export function StudioCreateView() {
         body.set("agenticSamplesPerIteration", String(cosmosAgenticSamples));
         body.set("agenticEarlyStop", String(cosmosAgenticEarlyStop));
         if (seed.trim()) body.set("seed", seed.trim());
+      }
+
+      // LTX 2.3 (descriptor-driven): emit ltx_<control> values + ltxfile_<file> uploads
+      if (isLtxProvider && ltxModel) {
+        for (const c of ltxModel.controls) {
+          const v = ltxValues[c.key];
+          if (v !== undefined && v !== "") body.set(`ltx_${c.key}`, String(v));
+        }
+        for (const f of ltxModel.files) {
+          const file = ltxFiles[f.key];
+          if (file) body.append(`ltxfile_${f.key}`, file);
+        }
       }
 
       // Atlas Cloud Seedance extras
@@ -406,6 +461,7 @@ export function StudioCreateView() {
       setAtlasRefImages([]);
       setAtlasRefVideos([]);
       setAtlasRefAudios([]);
+      setLtxFiles({});
       setSeed("");
       // Intentionally NOT navigating to /queue — the user stays on Studio to
       // fire more generations while watching status above.
@@ -423,6 +479,16 @@ export function StudioCreateView() {
     { value: "fal-i2v-2.7", label: "Wan 2.7 I2V (fal.ai)" },
     { value: "fal-r2v-2.7", label: "Wan 2.7 R2V (fal.ai)" },
     { value: "fal-cosmos3-i2v", label: "Cosmos 3 Super I2V (NVIDIA · fal.ai)" },
+    { value: "ltx-t2v", label: "LTX 2.3 Text→Video" },
+    { value: "ltx-t2v-fast", label: "LTX 2.3 Fast Text→Video" },
+    { value: "ltx-i2v", label: "LTX 2.3 Image→Video" },
+    { value: "ltx-i2v-fast", label: "LTX 2.3 Fast Image→Video" },
+    { value: "ltx-a2v", label: "LTX 2.3 Audio→Video" },
+    { value: "ltx-extend", label: "LTX 2.3 Extend Video" },
+    { value: "ltx-retake", label: "LTX 2.3 Retake Video" },
+    { value: "ltx-q-t2v", label: "LTX 2.3 Quality Text→Video" },
+    { value: "ltx-q-i2v", label: "LTX 2.3 Quality Image→Video" },
+    { value: "ltx-q-a2v", label: "LTX 2.3 Quality Audio→Video" },
     { value: "atlas-seedance-i2v", label: "Seedance 2.0 I2V (Atlas Cloud)" },
     { value: "atlas-seedance-fast-i2v", label: "Seedance 2.0 Fast I2V (Atlas Cloud)" },
     { value: "atlas-seedance-r2v", label: "Seedance 2.0 R2V (Atlas Cloud)" },
@@ -448,6 +514,92 @@ export function StudioCreateView() {
     return `rounded-2xl border px-4 py-2 text-xs uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.92] active:brightness-110 ${
       active ? activeStyles[color] : inactiveStyles[color]
     }`;
+  };
+
+  // Render a single descriptor-driven LTX control.
+  const setLtxVal = (k: string, v: string | boolean) => setLtxValues((prev) => ({ ...prev, [k]: v }));
+  const renderLtxControl = (c: LtxControl) => {
+    const val = ltxValues[c.key];
+    if (c.kind === "bool") {
+      const on = val === true || val === "true";
+      return (
+        <div key={c.key} className="flex flex-wrap items-center gap-3">
+          <button type="button" className={pill(on, "amber")} onClick={() => setLtxVal(c.key, !on)}>
+            {c.label}: {on ? "ON" : "OFF"}
+          </button>
+          {c.hint ? <span className="text-xs text-fuchsia-200/60">{c.hint}</span> : null}
+        </div>
+      );
+    }
+    if (c.kind === "enumInt" || c.kind === "enumStr") {
+      return (
+        <div key={c.key}>
+          <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">{c.label}</label>
+          <div className="flex flex-wrap gap-2">
+            {(c.enumValues || []).map((ev) => {
+              const s = String(ev);
+              return (
+                <button key={s} type="button" className={pill(String(val) === s)} onClick={() => setLtxVal(c.key, s)}>
+                  {s}
+                </button>
+              );
+            })}
+          </div>
+          {c.hint ? <p className="mt-1 text-xs text-fuchsia-200/60">{c.hint}</p> : null}
+        </div>
+      );
+    }
+    if (c.kind === "text") {
+      return (
+        <div key={c.key}>
+          <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">{c.label}</label>
+          <textarea
+            className="h-20 w-full resize-y rounded-2xl border border-fuchsia-200/25 bg-slate-900/70 p-3 text-sm"
+            value={String(val ?? "")}
+            onChange={(e) => setLtxVal(c.key, e.target.value)}
+          />
+          {c.hint ? <p className="mt-1 text-xs text-fuchsia-200/60">{c.hint}</p> : null}
+        </div>
+      );
+    }
+    // int / float
+    const optional = c.default === "";
+    if (optional) {
+      return (
+        <div key={c.key}>
+          <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">{c.label}</label>
+          <input
+            type="number"
+            min={c.min}
+            max={c.max}
+            step={c.step}
+            placeholder="(optional)"
+            value={String(val ?? "")}
+            onChange={(e) => setLtxVal(c.key, e.target.value)}
+            className="block w-full rounded-2xl border border-fuchsia-200/25 bg-slate-900/70 p-3 text-sm"
+          />
+          {c.hint ? <p className="mt-1 text-xs text-fuchsia-200/60">{c.hint}</p> : null}
+        </div>
+      );
+    }
+    const num = Number(val ?? c.default);
+    return (
+      <div key={c.key}>
+        <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">
+          {c.label}: {String(val ?? c.default)}
+        </label>
+        <input
+          type="range"
+          min={c.min}
+          max={c.max}
+          step={c.step}
+          value={Number.isFinite(num) ? num : Number(c.default)}
+          onChange={(e) => setLtxVal(c.key, e.target.value)}
+          className="w-full accent-fuchsia-300"
+        />
+        {c.hint ? <p className="mt-1 text-xs text-fuchsia-200/60">{c.hint}</p> : null}
+      </div>
+    );
   };
 
   return (
@@ -587,8 +739,8 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              {/* Duration selector — Cosmos uses num_frames/fps; Atlas has its own. */}
-              {!isAtlasProvider && !isCosmosProvider ? (
+              {/* Duration selector — Cosmos uses num_frames/fps; Atlas/LTX have their own. */}
+              {!isAtlasProvider && !isCosmosProvider && !isLtxProvider ? (
                 <div>
                   <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Duration</label>
                   <div className="flex flex-wrap gap-2">
@@ -606,8 +758,8 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              {/* Resolution selector — non-Atlas (720p/1080p). Cosmos uses tiers; Atlas its own. */}
-              {!isAtlasProvider && !isCosmosProvider ? (
+              {/* Resolution selector — non-Atlas (720p/1080p). Cosmos/LTX use their own. */}
+              {!isAtlasProvider && !isCosmosProvider && !isLtxProvider ? (
                 <div>
                   <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Resolution</label>
                   <div className="flex flex-wrap gap-2">
@@ -822,6 +974,51 @@ export function StudioCreateView() {
                     ) : null}
                   </div>
                 </>
+              ) : null}
+
+              {/* ── LTX 2.3 config panel (Lightricks via fal.ai) ── */}
+              {isLtxProvider && ltxModel ? (
+                <div className="space-y-4 rounded-2xl border border-fuchsia-300/25 bg-fuchsia-950/15 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-fuchsia-100/35 bg-fuchsia-300/10 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-fuchsia-100">
+                      Lightricks &middot; {ltxModel.label}
+                    </span>
+                    <span className="text-xs text-fuchsia-200/70">fal.ai &middot; {ltxModel.pricing}</span>
+                    <span className="text-[11px] text-fuchsia-200/60">
+                      {ltxModel.safetyParam ? "Safety filter disabled" : "No safety toggle on this endpoint"}
+                    </span>
+                  </div>
+
+                  {ltxModel.files.length > 0 ? (
+                    <div className="space-y-3">
+                      {ltxModel.files.map((f) => (
+                        <div key={f.key}>
+                          <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">
+                            {f.label}
+                            {f.required ? " (required)" : ""}
+                          </label>
+                          <input
+                            type="file"
+                            accept={f.accept}
+                            className="block w-full rounded-2xl border border-fuchsia-200/25 bg-slate-900/70 p-3 text-sm"
+                            onChange={(event) =>
+                              setLtxFiles((prev) => ({ ...prev, [f.key]: event.target.files?.[0] || null }))
+                            }
+                          />
+                          <p className="mt-1 text-xs text-fuchsia-200/60">
+                            {f.formats}
+                            {f.hint ? ` — ${f.hint}` : ""}
+                          </p>
+                          {ltxFiles[f.key] ? (
+                            <p className="mt-1 text-xs text-emerald-300/70">{ltxFiles[f.key]?.name}</p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {ltxModel.controls.map(renderLtxControl)}
+                </div>
               ) : null}
 
               {/* ── Cosmos 3 Super config panel (NVIDIA via fal.ai) ── */}

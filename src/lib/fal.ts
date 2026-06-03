@@ -1,4 +1,5 @@
 import { envServer } from "@/lib/env/server";
+import { buildLtxPayload, isLtxMode, ltxModelId, ltxModelName } from "@/lib/ltx";
 import type { JobMode, JobStatus, MediaKind } from "@/types/app";
 
 /**
@@ -41,6 +42,8 @@ const FAL_MODEL_IDS: Record<string, string> = {
 };
 
 const falModelIdForMode = (mode: string): string => {
+  const ltx = ltxModelId(mode);
+  if (ltx) return ltx;
   const id = FAL_MODEL_IDS[mode];
   if (!id) throw new Error(`No fal.ai model ID mapped for mode "${mode}".`);
   return id;
@@ -102,6 +105,11 @@ export interface FalStartRequest {
   agenticSamplesPerIteration?: number;
   /** Cosmos agentic: stop early when the critic clears the quality threshold. */
   agenticEarlyStop?: boolean;
+  // ── LTX-2.3 params (descriptor-driven; see src/lib/ltx.ts) ──
+  /** Raw LTX control values keyed by control.key. */
+  ltxParams?: Record<string, unknown>;
+  /** Resolved signed URLs for LTX file inputs keyed by file.key. */
+  ltxFiles?: Record<string, string>;
   // ── Image params ──
   /** Edit models: array of image URLs (1-4 for edit, required) */
   imageUrls?: string[];
@@ -352,6 +360,13 @@ const buildPayloadT2I = (input: FalStartRequest): Record<string, unknown> => {
 };
 
 const buildPayload = (input: FalStartRequest): Record<string, unknown> => {
+  if (isLtxMode(input.mode)) {
+    return buildLtxPayload(input.mode, {
+      prompt: input.prompt,
+      ltxParams: input.ltxParams,
+      ltxFiles: input.ltxFiles,
+    });
+  }
   switch (input.mode) {
     case "video:fal-i2v":
       return buildPayloadV26I2V(input);
@@ -595,7 +610,7 @@ export const getFalJobStatus = async (
 // ── Mode helpers ────────────────────────────────────────────────────
 
 export const isFalMode = (mode: string): boolean =>
-  mode in FAL_MODEL_IDS;
+  mode in FAL_MODEL_IDS || isLtxMode(mode);
 
 /** Determine media kind for a fal.ai mode. */
 export const falMediaKind = (mode: string): MediaKind =>
@@ -614,4 +629,4 @@ const FAL_MODEL_NAMES: Record<string, string> = {
 };
 
 export const falModelName = (mode: string): string =>
-  FAL_MODEL_NAMES[mode] || "wan-fal-unknown";
+  (isLtxMode(mode) ? ltxModelName(mode) : FAL_MODEL_NAMES[mode]) || "wan-fal-unknown";
