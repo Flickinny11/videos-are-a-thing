@@ -43,16 +43,21 @@ type AtlasRatio =
 
 /**
  * Cosmos 3 Super output dimensions. fal clamps/snaps to the nearest supported
- * NVIDIA tier (256p / 480p / 720p) and aspect ratio, so these are the canonical
- * tier sizes. Default is 480p landscape (832×480) per the model docs.
+ * NVIDIA tier and aspect ratio, so a generous set of presets is safe. Covers
+ * 256p / 480p / 720p plus HD (incl. 1024×1024). Default is 480p 16:9 (832×480).
  */
 const COSMOS_TIERS: { value: string; label: string; width: number; height: number }[] = [
-  { value: "256p-landscape", label: "256p · 16:9", width: 448, height: 256 },
-  { value: "480p-landscape", label: "480p · 16:9", width: 832, height: 480 },
-  { value: "480p-portrait", label: "480p · 9:16", width: 480, height: 832 },
-  { value: "480p-square", label: "480p · 1:1", width: 640, height: 640 },
-  { value: "720p-landscape", label: "720p · 16:9", width: 1280, height: 720 },
-  { value: "720p-portrait", label: "720p · 9:16", width: 720, height: 1280 },
+  { value: "256p-16:9", label: "256p · 16:9", width: 448, height: 256 },
+  { value: "480p-16:9", label: "480p · 16:9", width: 832, height: 480 },
+  { value: "480p-9:16", label: "480p · 9:16", width: 480, height: 832 },
+  { value: "480p-1:1", label: "480p · 1:1", width: 640, height: 640 },
+  { value: "720p-16:9", label: "720p · 16:9", width: 1280, height: 720 },
+  { value: "720p-9:16", label: "720p · 9:16", width: 720, height: 1280 },
+  { value: "720p-1:1", label: "720p · 1:1", width: 960, height: 960 },
+  { value: "hd-1:1", label: "1024² HD · 1:1", width: 1024, height: 1024 },
+  { value: "hd-16:9", label: "1024 HD · 16:9", width: 1024, height: 576 },
+  { value: "hd-9:16", label: "1024 HD · 9:16", width: 576, height: 1024 },
+  { value: "hd-4:3", label: "1024 HD · 4:3", width: 1024, height: 768 },
 ];
 
 export function StudioCreateView() {
@@ -89,7 +94,7 @@ export function StudioCreateView() {
   const [cosmosFps, setCosmosFps] = useState<number>(24);
   const [cosmosSteps, setCosmosSteps] = useState<number>(28);
   const [cosmosGuidance, setCosmosGuidance] = useState<number>(6);
-  const [cosmosTier, setCosmosTier] = useState<string>("480p-landscape"); // maps to width/height
+  const [cosmosTier, setCosmosTier] = useState<string>("480p-16:9"); // maps to width/height
   const [cosmosAgentic, setCosmosAgentic] = useState(false);
   const [cosmosAgenticIterations, setCosmosAgenticIterations] = useState<number>(2);
   const [cosmosAgenticSamples, setCosmosAgenticSamples] = useState<number>(2);
@@ -860,7 +865,7 @@ export function StudioCreateView() {
                     <input
                       type="range"
                       min={5}
-                      max={189}
+                      max={400}
                       step={1}
                       value={cosmosNumFrames}
                       onChange={(event) => setCosmosNumFrames(Number(event.target.value))}
@@ -876,7 +881,7 @@ export function StudioCreateView() {
                       onChange={(event) => setCosmosFps(Number(event.target.value))}
                       className="w-full accent-sky-300"
                     />
-                    <p className="mt-1 text-xs text-sky-200/60">num_frames 5–189 &divide; frames_per_second 4–60 sets the clip length.</p>
+                    <p className="mt-1 text-xs text-sky-200/60">num_frames 5–400 &divide; frames_per_second 4–60 sets the clip length (up to ~16.7s @ 24fps).</p>
                   </div>
 
                   {/* Inference steps */}

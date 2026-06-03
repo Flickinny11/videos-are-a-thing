@@ -293,10 +293,10 @@ const buildPayloadCosmos3I2V = (input: FalStartRequest): Record<string, unknown>
     agentic_samples_per_iteration: clampInt(input.agenticSamplesPerIteration, 1, 3, 2),
     agentic_early_stop: input.agenticEarlyStop ?? true,
     image_size: {
-      width: clampInt(input.width, 256, 1280, 832),
-      height: clampInt(input.height, 256, 1280, 480),
+      width: clampInt(input.width, 256, 1920, 832),
+      height: clampInt(input.height, 256, 1920, 480),
     },
-    num_frames: clampInt(input.numFrames, 5, 189, 189),
+    num_frames: clampInt(input.numFrames, 5, 400, 189),
     frames_per_second: clampInt(input.framesPerSecond, 4, 60, 24),
     num_inference_steps: clampInt(input.numInferenceSteps, 1, 50, 28),
     guidance_scale: clampFloat(input.guidanceScale, 0, 20, 6),
