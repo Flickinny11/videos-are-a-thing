@@ -11,6 +11,7 @@ import {
   type AtlasResolution,
 } from "@/lib/atlas";
 import { FalError, falModelName, isFalMode, startFalJob } from "@/lib/fal";
+import { LTX_MODELS, isLtxMode } from "@/lib/ltx";
 import {
   createGenerationJob,
   createJobEvent,
@@ -108,8 +109,14 @@ export async function POST(request: Request) {
     const durationRaw = Number(formData.get("duration") || 5);
     const resolutionRaw = String(formData.get("resolution") || "720p").trim();
     const sourceFile = formData.get("sourceFile");
+    const videoProvider = String(formData.get("videoProvider") || "runpod").trim();
 
-    if (!prompt) return fail("Prompt is required.");
+    // Prompt is required for every mode EXCEPT LTX endpoints whose schema makes
+    // it optional (audio-to-video, extend-video). Those get their own validation
+    // in the LTX branch below.
+    const ltxPromptOptional =
+      isLtxMode(`video:${videoProvider}`) && LTX_MODELS[`video:${videoProvider}`]?.promptRequired === false;
+    if (!prompt && !ltxPromptOptional) return fail("Prompt is required.");
     if (!["image", "video"].includes(mediaType)) return fail("mediaType must be image or video.");
 
     const duration = durationRaw >= 2 && durationRaw <= 15 ? durationRaw : 5;
@@ -117,7 +124,6 @@ export async function POST(request: Request) {
       ? (resolutionRaw as "720p" | "1080p")
       : "720p";
 
-    const videoProvider = String(formData.get("videoProvider") || "runpod").trim();
     const audioFile = formData.get("audioFile");
 
     let mode: JobMode;
@@ -127,6 +133,16 @@ export async function POST(request: Request) {
         "fal-i2v-2.7": "video:fal-i2v-2.7",
         "fal-r2v-2.7": "video:fal-r2v-2.7",
         "fal-cosmos3-i2v": "video:fal-cosmos3-i2v",
+        "ltx-t2v": "video:ltx-t2v",
+        "ltx-t2v-fast": "video:ltx-t2v-fast",
+        "ltx-i2v": "video:ltx-i2v",
+        "ltx-i2v-fast": "video:ltx-i2v-fast",
+        "ltx-a2v": "video:ltx-a2v",
+        "ltx-extend": "video:ltx-extend",
+        "ltx-retake": "video:ltx-retake",
+        "ltx-q-t2v": "video:ltx-q-t2v",
+        "ltx-q-i2v": "video:ltx-q-i2v",
+        "ltx-q-a2v": "video:ltx-q-a2v",
         "atlas-seedance-i2v": "video:atlas-seedance-i2v",
         "atlas-seedance-fast-i2v": "video:atlas-seedance-fast-i2v",
         "atlas-seedance-r2v": "video:atlas-seedance-r2v",
@@ -174,9 +190,11 @@ export async function POST(request: Request) {
       "image:fal-edit-2.7", "image:fal-pro-edit-2.7",
       "image:fal-seedream-edit-4.5",
     ];
-    const fileRequired = !noSourceFileModes.includes(mode);
+    // LTX modes use their own per-task file fields (ltxfile_*), never the generic sourceFile.
+    const fileRequired = !isLtxMode(mode) && !noSourceFileModes.includes(mode);
     let inputPath: string | null = null;
     let inputSignedUrl: string | undefined;
+    let ltxDurationSeconds: number | null = null;
 
     if (fileRequired) {
       if (!(sourceFile instanceof File)) {
@@ -398,7 +416,56 @@ export async function POST(request: Request) {
     const atlasWatermark = formData.get("atlasWatermark") === "true";
     const atlasReturnLastFrame = formData.get("atlasReturnLastFrame") === "true";
 
-    if (isAtlasMode(mode)) {
+    if (isLtxMode(mode)) {
+      const ltxModel = LTX_MODELS[mode];
+      if (ltxModel.promptRequired && !prompt) {
+        return fail(`A prompt is required for ${ltxModel.label}.`);
+      }
+      // Collect control values (raw strings; coerced/validated in buildLtxPayload).
+      const ltxParams: Record<string, unknown> = {};
+      for (const c of ltxModel.controls) {
+        const raw = formData.get(`ltx_${c.key}`);
+        if (raw !== null && typeof raw === "string") ltxParams[c.key] = raw;
+      }
+      // Upload each present file input → signed URL.
+      const ltxFiles: Record<string, string> = {};
+      for (const f of ltxModel.files) {
+        const fileVal = formData.get(`ltxfile_${f.key}`);
+        if (fileVal instanceof File && fileVal.size > 0) {
+          const up = await saveUploadedInput({ userId: user.id, file: fileVal });
+          ltxFiles[f.key] = up.signedUrl;
+          if (!inputPath) inputPath = up.path; // keep a primary input for retry/history
+        } else if (f.required) {
+          return fail(`${f.label} is required for ${ltxModel.label}.`);
+        }
+      }
+      // fal's slash audio-to-video requires a prompt OR a reference image.
+      if (mode === "video:ltx-a2v" && !prompt && !ltxFiles["image_url"]) {
+        return fail("LTX Audio→Video needs either a prompt or a reference image.");
+      }
+      // Record an integer duration for the job row (column is integer).
+      if (ltxModel.family === "frames") {
+        const nf = Number(ltxParams["num_frames"] ?? 121);
+        const fps = Number(ltxParams["frames_per_second"] ?? 24);
+        ltxDurationSeconds = Math.max(
+          1,
+          Math.round((Number.isFinite(nf) ? nf : 121) / (Number.isFinite(fps) && fps > 0 ? fps : 24)),
+        );
+      } else if (ltxParams["duration"] !== undefined) {
+        const d = Math.round(Number(ltxParams["duration"]));
+        ltxDurationSeconds = Number.isFinite(d) && d > 0 ? d : null;
+      }
+      try {
+        const ltxResult = await startFalJob({ mode, prompt, ltxParams, ltxFiles });
+        providerJobId = ltxResult.requestId;
+        providerStatus = ltxResult.status;
+        providerRaw = ltxResult.raw;
+        model = falModelName(mode);
+      } catch (error) {
+        const normalized = normalizeProviderError(error);
+        return fail(normalized.message, normalized.status);
+      }
+    } else if (isAtlasMode(mode)) {
       try {
         const atlasResult = await startAtlasJob({
           mode,
@@ -494,11 +561,13 @@ export async function POST(request: Request) {
       mode,
       model,
       prompt,
-      durationSeconds: mode === "video:fal-cosmos3-i2v"
-        ? Math.max(1, Math.round((numFrames || 189) / (framesPerSecond || 24)))
-        : mode.startsWith("video")
-          ? duration
-          : null,
+      durationSeconds: isLtxMode(mode)
+        ? ltxDurationSeconds
+        : mode === "video:fal-cosmos3-i2v"
+          ? Math.max(1, Math.round((numFrames || 189) / (framesPerSecond || 24)))
+          : mode.startsWith("video")
+            ? duration
+            : null,
       inputMediaPath: inputPath,
       runpodJobId: providerJobId,
       initialStatus: providerStatus,
