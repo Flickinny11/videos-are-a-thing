@@ -40,26 +40,54 @@ const parsePollError = (error: unknown): ParsedPollError => {
     parsedRaw = {};
   }
 
-  const httpStatus =
-    typeof parsedRaw.httpStatus === "number" && Number.isFinite(parsedRaw.httpStatus)
-      ? parsedRaw.httpStatus
+  // Provider error classes (FalError / AtlasError / RunpodError) carry the real
+  // HTTP status on the thrown object itself — prefer that over whatever happens
+  // to be embedded in the (often empty) message body, so a "request expired"
+  // 404/4xx is actually recognizable instead of being lost.
+  const errObj = error as unknown as { httpStatus?: unknown };
+  const errorHttpStatus =
+    typeof errObj.httpStatus === "number" && Number.isFinite(errObj.httpStatus)
+      ? errObj.httpStatus
       : null;
+
+  const httpStatus =
+    errorHttpStatus ??
+    (typeof parsedRaw.httpStatus === "number" && Number.isFinite(parsedRaw.httpStatus)
+      ? parsedRaw.httpStatus
+      : null);
 
   const parsedMessageCandidates = [parsedRaw.error, parsedRaw.message];
   const parsedMessage = parsedMessageCandidates.find((value) => typeof value === "string");
 
-  return {
-    httpStatus,
-    message:
-      typeof parsedMessage === "string" && parsedMessage.trim().length
-        ? parsedMessage
-        : error.message || "Polling failed.",
-    raw: parsedRaw,
-  };
+  const rawMessage =
+    typeof parsedMessage === "string" && parsedMessage.trim().length
+      ? parsedMessage
+      : error.message || "Polling failed.";
+  // An empty provider body ("{}" / whitespace) is unhelpful in the UI; surface
+  // the status instead.
+  const message =
+    rawMessage.replace(/[{}\s]/g, "").length === 0 && httpStatus !== null
+      ? `Provider returned HTTP ${httpStatus} for this request (it may have expired or been removed).`
+      : rawMessage;
+
+  return { httpStatus, message, raw: parsedRaw };
 };
 
+// A poll failure is terminal (mark the job FAILED, stop retrying) when the
+// provider says the request is gone or invalid. Any non-transient 4xx on a
+// status check means the request id is unknown/expired/unrecoverable — only
+// 429 (rate limit) and 408 (timeout) are worth retrying among client errors;
+// 5xx are transient and re-thrown for the next poll tick.
 const isTerminalRunpodPollError = (input: ParsedPollError): boolean => {
-  if (input.httpStatus === 404) return true;
+  if (
+    input.httpStatus !== null &&
+    input.httpStatus >= 400 &&
+    input.httpStatus < 500 &&
+    input.httpStatus !== 429 &&
+    input.httpStatus !== 408
+  ) {
+    return true;
+  }
 
   const text = input.message.toLowerCase();
   return (
