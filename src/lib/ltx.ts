@@ -57,8 +57,8 @@ export interface LtxModel {
   safetyParam?: string;
 }
 
-const IMG_ACCEPT = "image/png,image/jpeg,image/webp,image/avif,image/gif,.png,.jpg,.jpeg,.webp,.avif,.gif";
-const IMG_FORMATS = "PNG, JPEG, WebP, AVIF, or (static) GIF";
+const IMG_ACCEPT = "image/png,image/jpeg,image/webp,image/avif,image/heic,image/heif,image/gif,.png,.jpg,.jpeg,.webp,.avif,.heic,.heif,.gif";
+const IMG_FORMATS = "PNG, JPEG, WebP, AVIF, HEIF, or (static) GIF";
 const VIDEO_ACCEPT = "video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,.m4v";
 const VIDEO_FORMATS = "MP4 (recommended), MOV, WebM";
 const AUDIO_ACCEPT = "audio/mpeg,audio/wav,audio/mp4,audio/aac,audio/ogg,audio/flac,.mp3,.wav,.m4a,.aac,.ogg,.flac";

@@ -109,8 +109,14 @@ export async function POST(request: Request) {
     const durationRaw = Number(formData.get("duration") || 5);
     const resolutionRaw = String(formData.get("resolution") || "720p").trim();
     const sourceFile = formData.get("sourceFile");
+    const videoProvider = String(formData.get("videoProvider") || "runpod").trim();
 
-    if (!prompt) return fail("Prompt is required.");
+    // Prompt is required for every mode EXCEPT LTX endpoints whose schema makes
+    // it optional (audio-to-video, extend-video). Those get their own validation
+    // in the LTX branch below.
+    const ltxPromptOptional =
+      isLtxMode(`video:${videoProvider}`) && LTX_MODELS[`video:${videoProvider}`]?.promptRequired === false;
+    if (!prompt && !ltxPromptOptional) return fail("Prompt is required.");
     if (!["image", "video"].includes(mediaType)) return fail("mediaType must be image or video.");
 
     const duration = durationRaw >= 2 && durationRaw <= 15 ? durationRaw : 5;
@@ -118,7 +124,6 @@ export async function POST(request: Request) {
       ? (resolutionRaw as "720p" | "1080p")
       : "720p";
 
-    const videoProvider = String(formData.get("videoProvider") || "runpod").trim();
     const audioFile = formData.get("audioFile");
 
     let mode: JobMode;
@@ -433,6 +438,10 @@ export async function POST(request: Request) {
         } else if (f.required) {
           return fail(`${f.label} is required for ${ltxModel.label}.`);
         }
+      }
+      // fal's slash audio-to-video requires a prompt OR a reference image.
+      if (mode === "video:ltx-a2v" && !prompt && !ltxFiles["image_url"]) {
+        return fail("LTX Audio→Video needs either a prompt or a reference image.");
       }
       // Record an integer duration for the job row (column is integer).
       if (ltxModel.family === "frames") {
