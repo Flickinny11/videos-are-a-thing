@@ -6,6 +6,7 @@ export type JobMode =
   | "video:fal-i2v"
   | "video:fal-i2v-2.7"
   | "video:fal-r2v-2.7"
+  | "video:fal-cosmos3-i2v"
   | "video:atlas-seedance-i2v"
   | "video:atlas-seedance-fast-i2v"
   | "video:atlas-seedance-r2v"

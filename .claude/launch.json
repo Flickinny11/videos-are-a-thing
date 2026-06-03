@@ -1,0 +1,15 @@
+{
+  // Claude Code "Preview" / remote-desktop server config.
+  // Committed to the repo so cloud sessions (which clone a fresh copy and do
+  // NOT inherit local/user-scoped config) detect the dev server automatically
+  // instead of reporting "needs to be set up".
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "videos-are-a-thing",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000
+    }
+  ]
+}

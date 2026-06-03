@@ -126,6 +126,7 @@ export async function POST(request: Request) {
         "fal": "video:fal-i2v",
         "fal-i2v-2.7": "video:fal-i2v-2.7",
         "fal-r2v-2.7": "video:fal-r2v-2.7",
+        "fal-cosmos3-i2v": "video:fal-cosmos3-i2v",
         "atlas-seedance-i2v": "video:atlas-seedance-i2v",
         "atlas-seedance-fast-i2v": "video:atlas-seedance-fast-i2v",
         "atlas-seedance-r2v": "video:atlas-seedance-r2v",
@@ -346,6 +347,27 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── Cosmos 3 Super I2V parameters ──
+    // Length is driven by num_frames ÷ fps (no simple "duration" field).
+    const numFrames = mode === "video:fal-cosmos3-i2v"
+      ? Number(formData.get("numFrames") || 189) : undefined;
+    const framesPerSecond = mode === "video:fal-cosmos3-i2v"
+      ? Number(formData.get("framesPerSecond") || 24) : undefined;
+    const numInferenceSteps = mode === "video:fal-cosmos3-i2v"
+      ? Number(formData.get("numInferenceSteps") || 28) : undefined;
+    const guidanceScale = mode === "video:fal-cosmos3-i2v"
+      ? Number(formData.get("guidanceScale") || 6) : undefined;
+    const cosmosWidth = mode === "video:fal-cosmos3-i2v"
+      ? Number(formData.get("cosmosWidth") || 832) : undefined;
+    const cosmosHeight = mode === "video:fal-cosmos3-i2v"
+      ? Number(formData.get("cosmosHeight") || 480) : undefined;
+    const enableAgenticGeneration = formData.get("enableAgenticGeneration") === "true";
+    const agenticMaxIterations = mode === "video:fal-cosmos3-i2v"
+      ? Number(formData.get("agenticMaxIterations") || 2) : undefined;
+    const agenticSamplesPerIteration = mode === "video:fal-cosmos3-i2v"
+      ? Number(formData.get("agenticSamplesPerIteration") || 2) : undefined;
+    const agenticEarlyStop = formData.get("agenticEarlyStop") !== "false";
+
     // Atlas-specific parameters (resolution 480/720p, ratio, audio, watermark).
     const atlasResolutionRaw = String(formData.get("atlasResolution") || "720p").trim();
     const atlasResolution: AtlasResolution =
@@ -427,6 +449,17 @@ export async function POST(request: Request) {
           numImages,
           maxImages: maxImages > 1 ? maxImages : undefined,
           seed,
+          // Cosmos 3 Super I2V
+          numFrames,
+          framesPerSecond,
+          numInferenceSteps,
+          guidanceScale,
+          width: cosmosWidth,
+          height: cosmosHeight,
+          enableAgenticGeneration,
+          agenticMaxIterations,
+          agenticSamplesPerIteration,
+          agenticEarlyStop,
         });
         providerJobId = falResult.requestId;
         providerStatus = falResult.status;
@@ -461,7 +494,11 @@ export async function POST(request: Request) {
       mode,
       model,
       prompt,
-      durationSeconds: mode.startsWith("video") ? duration : null,
+      durationSeconds: mode === "video:fal-cosmos3-i2v"
+        ? Math.round(((numFrames || 189) / (framesPerSecond || 24)) * 10) / 10
+        : mode.startsWith("video")
+          ? duration
+          : null,
       inputMediaPath: inputPath,
       runpodJobId: providerJobId,
       initialStatus: providerStatus,
