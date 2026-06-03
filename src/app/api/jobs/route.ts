@@ -495,7 +495,7 @@ export async function POST(request: Request) {
       model,
       prompt,
       durationSeconds: mode === "video:fal-cosmos3-i2v"
-        ? Math.round(((numFrames || 189) / (framesPerSecond || 24)) * 10) / 10
+        ? Math.max(1, Math.round((numFrames || 189) / (framesPerSecond || 24)))
         : mode.startsWith("video")
           ? duration
           : null,
