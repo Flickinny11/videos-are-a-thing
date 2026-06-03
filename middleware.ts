@@ -3,20 +3,39 @@ import { NextResponse } from "next/server";
 
 import { updateSession } from "@/lib/supabase/middleware";
 
+/**
+ * Build a redirect that preserves any auth cookies that `updateSession` set on
+ * the original response (refreshed tokens, or — critically — the *removal* of a
+ * stale cookie). Without copying these, a redirect would drop the cookie
+ * mutation and the next request would loop right back here.
+ */
+const redirectPreservingCookies = (request: NextRequest, pathname: string, base: NextResponse) => {
+  const url = request.nextUrl.clone();
+  url.pathname = pathname;
+  url.search = "";
+  const redirect = NextResponse.redirect(url);
+  base.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
+  return redirect;
+};
+
 export async function middleware(request: NextRequest) {
-  const response = await updateSession(request);
+  const { response, user } = await updateSession(request);
 
-  const isAuthRoute = request.nextUrl.pathname.startsWith("/login");
-  const hasAuthToken = request.cookies
-    .getAll()
-    .some((cookie) => cookie.name.includes("auth-token"));
+  const { pathname } = request.nextUrl;
+  const isAuthRoute = pathname.startsWith("/login");
+  const isApiRoute = pathname.startsWith("/api");
 
-  if (!hasAuthToken && !isAuthRoute && !request.nextUrl.pathname.startsWith("/api")) {
-    return NextResponse.redirect(new URL("/login", request.url));
+  // Unauthenticated (no valid session) and trying to reach a protected page →
+  // send to the login form. API routes do their own auth and must not redirect.
+  if (!user && !isAuthRoute && !isApiRoute) {
+    return redirectPreservingCookies(request, "/login", response);
   }
 
-  if (hasAuthToken && isAuthRoute) {
-    return NextResponse.redirect(new URL("/", request.url));
+  // Already authenticated but sitting on the login page → go straight to the
+  // studio. Gating on the validated `user` (not a cookie name) prevents the
+  // /login ⇄ / redirect loop that stale cookies used to trigger.
+  if (user && isAuthRoute) {
+    return redirectPreservingCookies(request, "/studio", response);
   }
 
   return response;

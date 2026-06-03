@@ -31,6 +31,7 @@ const FAL_MODEL_IDS: Record<string, string> = {
   "video:fal-i2v": "wan/v2.6/image-to-video",
   "video:fal-i2v-2.7": "fal-ai/wan/v2.7/image-to-video",
   "video:fal-r2v-2.7": "fal-ai/wan/v2.7/reference-to-video",
+  "video:fal-cosmos3-i2v": "nvidia/cosmos-3-super/image-to-video",
   // Image models
   "image:fal-edit-2.7": "fal-ai/wan/v2.7/edit",
   "image:fal-pro-edit-2.7": "fal-ai/wan/v2.7/pro/edit",
@@ -81,6 +82,26 @@ export interface FalStartRequest {
   aspectRatio?: "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
   /** Wan 2.7 R2V: multi-shot segmentation */
   multiShots?: boolean;
+  // ── Cosmos 3 Super I2V params (nvidia/cosmos-3-super/image-to-video) ──
+  /** Cosmos: number of frames to generate (5-189). With FPS, sets video length. */
+  numFrames?: number;
+  /** Cosmos: frames per second of the output video (4-60). */
+  framesPerSecond?: number;
+  /** Cosmos: denoising steps (1-50). More = higher quality, slower. */
+  numInferenceSteps?: number;
+  /** Cosmos: classifier-free guidance scale (0-20). */
+  guidanceScale?: number;
+  /** Cosmos: output dimensions, snapped to nearest NVIDIA 256p/480p/720p tier. */
+  width?: number;
+  height?: number;
+  /** Cosmos agentic loop: enable iterative upsample → render → critique → rewrite. */
+  enableAgenticGeneration?: boolean;
+  /** Cosmos agentic: max prompt stages (1-3). */
+  agenticMaxIterations?: number;
+  /** Cosmos agentic: candidate videos judged per iteration (1-3). */
+  agenticSamplesPerIteration?: number;
+  /** Cosmos agentic: stop early when the critic clears the quality threshold. */
+  agenticEarlyStop?: boolean;
   // ── Image params ──
   /** Edit models: array of image URLs (1-4 for edit, required) */
   imageUrls?: string[];
@@ -244,6 +265,50 @@ const buildPayloadV27R2V = (input: FalStartRequest): Record<string, unknown> => 
   return payload;
 };
 
+const clampInt = (value: number | undefined, min: number, max: number, fallback: number): number => {
+  const n = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : fallback;
+  return Math.min(max, Math.max(min, n));
+};
+
+const clampFloat = (value: number | undefined, min: number, max: number, fallback: number): number => {
+  const n = typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  return Math.min(max, Math.max(min, n));
+};
+
+/**
+ * Cosmos 3 Super Image-to-Video — nvidia/cosmos-3-super/image-to-video.
+ * Required: prompt, image_url (conditioning first frame).
+ * Video length is controlled by num_frames (5-189) ÷ frames_per_second (4-60).
+ * enable_safety_checker is forced OFF per product requirement.
+ * negative_prompt is omitted unless the user supplies one, so fal applies
+ * NVIDIA's recommended default i2v negative prompt.
+ */
+const buildPayloadCosmos3I2V = (input: FalStartRequest): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {
+    prompt: input.prompt,
+    image_url: input.imageUrl,
+    enable_prompt_expansion: input.enablePromptExpansion ?? true,
+    enable_agentic_generation: input.enableAgenticGeneration ?? false,
+    agentic_max_iterations: clampInt(input.agenticMaxIterations, 1, 3, 2),
+    agentic_samples_per_iteration: clampInt(input.agenticSamplesPerIteration, 1, 3, 2),
+    agentic_early_stop: input.agenticEarlyStop ?? true,
+    image_size: {
+      width: clampInt(input.width, 256, 1280, 832),
+      height: clampInt(input.height, 256, 1280, 480),
+    },
+    num_frames: clampInt(input.numFrames, 5, 189, 189),
+    frames_per_second: clampInt(input.framesPerSecond, 4, 60, 24),
+    num_inference_steps: clampInt(input.numInferenceSteps, 1, 50, 28),
+    guidance_scale: clampFloat(input.guidanceScale, 0, 20, 6),
+    enable_safety_checker: false,
+  };
+  // Only override the model's recommended default negative prompt if the user
+  // provided one (empty string would disable it entirely).
+  if (input.negativePrompt) payload.negative_prompt = input.negativePrompt;
+  if (typeof input.seed === "number") payload.seed = input.seed;
+  return payload;
+};
+
 /** Wan 2.7 Edit & Pro Edit (image-to-image). */
 const buildPayloadEdit = (input: FalStartRequest): Record<string, unknown> => {
   const payload: Record<string, unknown> = {
@@ -292,6 +357,8 @@ const buildPayload = (input: FalStartRequest): Record<string, unknown> => {
       return buildPayloadV27I2V(input);
     case "video:fal-r2v-2.7":
       return buildPayloadV27R2V(input);
+    case "video:fal-cosmos3-i2v":
+      return buildPayloadCosmos3I2V(input);
     case "image:fal-edit-2.7":
     case "image:fal-pro-edit-2.7":
       return buildPayloadEdit(input);
@@ -528,6 +595,7 @@ const FAL_MODEL_NAMES: Record<string, string> = {
   "video:fal-i2v": "wan-v2.6-fal-i2v",
   "video:fal-i2v-2.7": "wan-v2.7-fal-i2v",
   "video:fal-r2v-2.7": "wan-v2.7-fal-r2v",
+  "video:fal-cosmos3-i2v": "cosmos-3-super-fal-i2v",
   "image:fal-edit-2.7": "wan-v2.7-fal-edit",
   "image:fal-pro-edit-2.7": "wan-v2.7-fal-pro-edit",
   "image:fal-t2i-2.7": "wan-v2.7-fal-t2i",

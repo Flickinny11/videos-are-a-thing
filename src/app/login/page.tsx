@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 import { EffectsErrorBoundary } from "@/components/app/EffectsErrorBoundary";
@@ -8,7 +7,6 @@ import { OglNebulaBackground } from "@/components/effects/OglNebulaBackground";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("Logantbaird@gmail.com");
   const [password, setPassword] = useState("Kilkinny!982");
   const [error, setError] = useState("");
@@ -23,11 +21,13 @@ export default function LoginPage() {
       const supabase = createSupabaseBrowserClient();
       const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
       if (authError) throw authError;
-      router.replace("/studio");
-      router.refresh();
+      // Hard navigation (not router.replace) so the server-rendered layout and
+      // middleware see the freshly written auth cookies on the very next
+      // request — a soft client transition can race the cookie write and bounce
+      // back to /login.
+      window.location.assign("/studio");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed.");
-    } finally {
       setLoading(false);
     }
   };

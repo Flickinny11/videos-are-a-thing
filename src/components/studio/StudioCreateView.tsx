@@ -1,18 +1,29 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { EffectsErrorBoundary } from "@/components/app/EffectsErrorBoundary";
 import { OglLiquidRibbon } from "@/components/effects/OglLiquidRibbon";
 import { PostFxHalo } from "@/components/effects/PostFxHalo";
+import { PremiumProgressBar } from "@/components/effects/PremiumProgressBar";
 import { RapierFloatField } from "@/components/effects/RapierFloatField";
+import { getRealtimeProgressPercent, isActiveJob } from "@/lib/job-progress";
+import type { JobResponse } from "@/types/app";
+
+/** First few words of a prompt, for the in-progress request chips. */
+const promptPreview = (text: string, words = 6): string => {
+  const trimmed = text.trim();
+  if (!trimmed) return "(no prompt)";
+  const parts = trimmed.split(/\s+/);
+  return parts.length <= words ? trimmed : `${parts.slice(0, words).join(" ")}…`;
+};
 
 type VideoProvider =
   | "runpod"
   | "fal"
   | "fal-i2v-2.7"
   | "fal-r2v-2.7"
+  | "fal-cosmos3-i2v"
   | "atlas-seedance-i2v"
   | "atlas-seedance-fast-i2v"
   | "atlas-seedance-r2v"
@@ -30,8 +41,21 @@ type AtlasRatio =
   | "3:4"
   | "9:16";
 
+/**
+ * Cosmos 3 Super output dimensions. fal clamps/snaps to the nearest supported
+ * NVIDIA tier (256p / 480p / 720p) and aspect ratio, so these are the canonical
+ * tier sizes. Default is 480p landscape (832×480) per the model docs.
+ */
+const COSMOS_TIERS: { value: string; label: string; width: number; height: number }[] = [
+  { value: "256p-landscape", label: "256p · 16:9", width: 448, height: 256 },
+  { value: "480p-landscape", label: "480p · 16:9", width: 832, height: 480 },
+  { value: "480p-portrait", label: "480p · 9:16", width: 480, height: 832 },
+  { value: "480p-square", label: "480p · 1:1", width: 640, height: 640 },
+  { value: "720p-landscape", label: "720p · 16:9", width: 1280, height: 720 },
+  { value: "720p-portrait", label: "720p · 9:16", width: 720, height: 1280 },
+];
+
 export function StudioCreateView() {
-  const router = useRouter();
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [mediaType, setMediaType] = useState<"image" | "video">("video");
@@ -57,8 +81,24 @@ export function StudioCreateView() {
   const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16" | "1:1" | "4:3" | "3:4">("16:9");
   const [multiShots, setMultiShots] = useState(false);
 
-  // Optional seed (both 2.7 video models)
+  // Optional seed (both 2.7 video models + Cosmos)
   const [seed, setSeed] = useState<string>("");
+
+  // ── Cosmos 3 Super I2V (NVIDIA, via fal.ai) ──
+  const [cosmosNumFrames, setCosmosNumFrames] = useState<number>(189);
+  const [cosmosFps, setCosmosFps] = useState<number>(24);
+  const [cosmosSteps, setCosmosSteps] = useState<number>(28);
+  const [cosmosGuidance, setCosmosGuidance] = useState<number>(6);
+  const [cosmosTier, setCosmosTier] = useState<string>("480p-landscape"); // maps to width/height
+  const [cosmosAgentic, setCosmosAgentic] = useState(false);
+  const [cosmosAgenticIterations, setCosmosAgenticIterations] = useState<number>(2);
+  const [cosmosAgenticSamples, setCosmosAgenticSamples] = useState<number>(2);
+  const [cosmosAgenticEarlyStop, setCosmosAgenticEarlyStop] = useState(true);
+
+  // ── In-progress request tracker (so the user can stay on Studio and fire
+  //    multiple generations back-to-back while watching their status). ──
+  const [trackedJobs, setTrackedJobs] = useState<JobResponse[]>([]);
+  const [dismissed, setDismissed] = useState<string[]>([]);
 
   // fal.ai image model extras
   const [editImages, setEditImages] = useState<File[]>([]);
@@ -77,7 +117,12 @@ export function StudioCreateView() {
   const [atlasRefVideos, setAtlasRefVideos] = useState<File[]>([]);
   const [atlasRefAudios, setAtlasRefAudios] = useState<File[]>([]);
 
-  const isFalProvider = videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7";
+  const isCosmosProvider = videoProvider === "fal-cosmos3-i2v";
+  const isFalProvider =
+    videoProvider === "fal" ||
+    videoProvider === "fal-i2v-2.7" ||
+    videoProvider === "fal-r2v-2.7" ||
+    isCosmosProvider;
 
   const isAtlasProvider =
     videoProvider === "atlas-seedance-i2v" ||
@@ -103,6 +148,7 @@ export function StudioCreateView() {
       if (mediaType === "video") {
         if (videoProvider === "fal-r2v-2.7") return false; // uses referenceImages instead
         if (videoProvider === "fal-i2v-2.7") return false; // image is optional for 2.7 I2V
+        if (videoProvider === "fal-cosmos3-i2v") return true; // conditioning first frame required
         if (videoProvider === "fal") return true;
         if (isAtlasI2V) return true; // Atlas i2v requires start image
         if (isAtlasR2V) return false; // uses atlasRefImages / atlasRefVideos
@@ -128,6 +174,94 @@ export function StudioCreateView() {
     if (isAtlasProvider) return [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     return [5, 10, 15];
   }, [videoProvider, isAtlasProvider]);
+
+  // ── In-progress request tracker + polling ──────────────────────────
+  const mountedRef = useRef(true);
+  const pollingRef = useRef(false);
+  const trackedRef = useRef<JobResponse[]>([]);
+  trackedRef.current = trackedJobs;
+
+  const upsertJobs = useCallback((incoming: JobResponse[]) => {
+    if (!incoming.length) return;
+    setTrackedJobs((current) => {
+      const byId = new Map(current.map((j) => [j.id, j]));
+      for (const job of incoming) byId.set(job.id, job);
+      return Array.from(byId.values()).sort((a, b) =>
+        (b.createdAt || "").localeCompare(a.createdAt || ""),
+      );
+    });
+  }, []);
+
+  // Poll active tracked jobs. This is also what drives completion + the
+  // download/persist-to-library step server-side, so generated videos land in
+  // the Library even when the user never leaves the Studio page.
+  const pollActiveJobs = useCallback(async () => {
+    if (pollingRef.current || !mountedRef.current) return;
+    pollingRef.current = true;
+    try {
+      const active = trackedRef.current.filter((j) => isActiveJob(j.status));
+      if (!active.length) return;
+      const settled = await Promise.allSettled(
+        active.map(async (job) => {
+          const res = await fetch(`/api/jobs/${job.id}/poll`, { method: "POST", cache: "no-store" });
+          const data = await res.json().catch(() => null);
+          if (!res.ok || !data?.success) return null;
+          return data.job as JobResponse;
+        }),
+      );
+      if (!mountedRef.current) return;
+      const updates = settled
+        .filter((r): r is PromiseFulfilledResult<JobResponse | null> => r.status === "fulfilled")
+        .map((r) => r.value)
+        .filter((v): v is JobResponse => v !== null);
+      upsertJobs(updates);
+    } finally {
+      pollingRef.current = false;
+    }
+  }, [upsertJobs]);
+
+  // Seed the tracker with jobs already in flight (e.g. fired right before a reload).
+  useEffect(() => {
+    mountedRef.current = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/jobs", { cache: "no-store" });
+        const data = await res.json().catch(() => null);
+        if (!mountedRef.current || !res.ok || !data?.success) return;
+        const jobs = (data.jobs as JobResponse[]) || [];
+        upsertJobs(jobs.filter((j) => isActiveJob(j.status)));
+      } catch {
+        /* non-fatal: tracker simply starts empty */
+      }
+    })();
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [upsertJobs]);
+
+  const hasActiveTracked = useMemo(() => trackedJobs.some((j) => isActiveJob(j.status)), [trackedJobs]);
+  const anyInProgress = useMemo(
+    () => trackedJobs.some((j) => j.status === "IN_PROGRESS"),
+    [trackedJobs],
+  );
+
+  useEffect(() => {
+    if (!hasActiveTracked) return;
+    const interval = anyInProgress ? 3000 : 6000;
+    const timer = setInterval(() => {
+      void pollActiveJobs();
+    }, interval);
+    return () => clearInterval(timer);
+  }, [hasActiveTracked, anyInProgress, pollActiveJobs]);
+
+  const visibleJobs = useMemo(
+    () => trackedJobs.filter((j) => !dismissed.includes(j.id)),
+    [trackedJobs, dismissed],
+  );
+
+  const dismissJob = useCallback((id: string) => {
+    setDismissed((cur) => (cur.includes(id) ? cur : [...cur, id]));
+  }, []);
 
   const submit = async () => {
     setError("");
@@ -185,6 +319,23 @@ export function StudioCreateView() {
         body.set("seed", seed.trim());
       }
 
+      // Cosmos 3 Super I2V extras (NVIDIA via fal.ai)
+      if (videoProvider === "fal-cosmos3-i2v") {
+        const tier = COSMOS_TIERS.find((t) => t.value === cosmosTier) ?? COSMOS_TIERS[1];
+        body.set("numFrames", String(cosmosNumFrames));
+        body.set("framesPerSecond", String(cosmosFps));
+        body.set("numInferenceSteps", String(cosmosSteps));
+        body.set("guidanceScale", String(cosmosGuidance));
+        body.set("cosmosWidth", String(tier.width));
+        body.set("cosmosHeight", String(tier.height));
+        body.set("enablePromptExpansion", String(enablePromptExpansion));
+        body.set("enableAgenticGeneration", String(cosmosAgentic));
+        body.set("agenticMaxIterations", String(cosmosAgenticIterations));
+        body.set("agenticSamplesPerIteration", String(cosmosAgenticSamples));
+        body.set("agenticEarlyStop", String(cosmosAgenticEarlyStop));
+        if (seed.trim()) body.set("seed", seed.trim());
+      }
+
       // Atlas Cloud Seedance extras
       if (isAtlasProvider) {
         body.set("atlasResolution", atlasResolution);
@@ -232,6 +383,9 @@ export function StudioCreateView() {
       }
 
       setFlash("success");
+      // Add the freshly-submitted job to the in-progress tracker so it shows up
+      // at the top of the page and starts polling — without leaving Studio.
+      if (data.job) upsertJobs([data.job as JobResponse]);
       setPrompt("");
       setNegativePrompt("");
       setSourceFile(null);
@@ -245,8 +399,8 @@ export function StudioCreateView() {
       setAtlasRefVideos([]);
       setAtlasRefAudios([]);
       setSeed("");
-      router.push("/queue");
-      router.refresh();
+      // Intentionally NOT navigating to /queue — the user stays on Studio to
+      // fire more generations while watching status above.
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unexpected submit error.");
       setFlash("failure");
@@ -260,6 +414,7 @@ export function StudioCreateView() {
     { value: "fal", label: "Wan 2.6 fal.ai (I2V)" },
     { value: "fal-i2v-2.7", label: "Wan 2.7 I2V (fal.ai)" },
     { value: "fal-r2v-2.7", label: "Wan 2.7 R2V (fal.ai)" },
+    { value: "fal-cosmos3-i2v", label: "Cosmos 3 Super I2V (NVIDIA · fal.ai)" },
     { value: "atlas-seedance-i2v", label: "Seedance 2.0 I2V (Atlas Cloud)" },
     { value: "atlas-seedance-fast-i2v", label: "Seedance 2.0 Fast I2V (Atlas Cloud)" },
     { value: "atlas-seedance-r2v", label: "Seedance 2.0 R2V (Atlas Cloud)" },
@@ -288,7 +443,58 @@ export function StudioCreateView() {
   };
 
   return (
-    <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+    <div className="space-y-6">
+      {/* In-progress request tracker — stays on Studio so you can fire multiple
+          generations back-to-back and watch each one to completion. */}
+      {visibleJobs.length > 0 ? (
+        <section className="rounded-[2rem] border border-cyan-100/20 bg-slate-950/55 p-4 backdrop-blur-2xl md:p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-100/90">Active Requests</h3>
+            <span className="text-[11px] uppercase tracking-[0.16em] text-cyan-100/60">
+              {visibleJobs.filter((j) => isActiveJob(j.status)).length} in progress
+            </span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {visibleJobs.map((job) => {
+              const done = job.status === "COMPLETED";
+              const failed = job.status === "FAILED" || job.status === "TIMED_OUT" || job.status === "CANCELLED";
+              const pct = getRealtimeProgressPercent(job);
+              return (
+                <div key={job.id} className="rounded-2xl border border-cyan-100/15 bg-white/[0.04] p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm text-slate-100">{promptPreview(job.prompt)}</p>
+                    <button
+                      type="button"
+                      onClick={() => dismissJob(job.id)}
+                      aria-label="Dismiss request"
+                      className="-mr-1 -mt-1 rounded-lg px-2 py-0.5 text-base leading-none text-cyan-100/50 transition hover:bg-white/10 hover:text-cyan-50"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-[11px] uppercase tracking-[0.14em]">
+                    <span className="text-cyan-100/55">{job.model}</span>
+                    <span className={done ? "text-emerald-300" : failed ? "text-rose-300" : "text-cyan-200"}>
+                      {done ? "Complete ✓" : failed ? "Failed" : `${pct}%`}
+                    </span>
+                  </div>
+                  <PremiumProgressBar
+                    progress={done || failed ? 100 : pct}
+                    status={done ? "completed" : failed ? "failed" : "active"}
+                    className="mt-2 h-2"
+                  />
+                  {failed && job.errorReason ? (
+                    <p className="mt-1 line-clamp-1 text-[11px] text-rose-300/80">{job.errorReason}</p>
+                  ) : null}
+                  {done ? <p className="mt-1 text-[11px] text-emerald-300/70">Saved to your Library.</p> : null}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
       <article className="relative isolate overflow-hidden rounded-[2.2rem] border border-cyan-100/20 bg-slate-950/55 p-5 backdrop-blur-2xl md:p-7">
         <EffectsErrorBoundary>
           <OglLiquidRibbon className="pointer-events-none absolute inset-0 opacity-60" />
@@ -373,8 +579,8 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              {/* Duration selector — non-Atlas providers use the regular duration state */}
-              {!isAtlasProvider ? (
+              {/* Duration selector — Cosmos uses num_frames/fps; Atlas has its own. */}
+              {!isAtlasProvider && !isCosmosProvider ? (
                 <div>
                   <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Duration</label>
                   <div className="flex flex-wrap gap-2">
@@ -392,8 +598,8 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              {/* Resolution selector — non-Atlas (720p/1080p). Atlas has its own (480p/720p). */}
-              {!isAtlasProvider ? (
+              {/* Resolution selector — non-Atlas (720p/1080p). Cosmos uses tiers; Atlas its own. */}
+              {!isAtlasProvider && !isCosmosProvider ? (
                 <div>
                   <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Resolution</label>
                   <div className="flex flex-wrap gap-2">
@@ -462,8 +668,8 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              {/* fal.ai pricing hint */}
-              {isFalProvider ? (
+              {/* fal.ai pricing hint (Wan models; Cosmos shows its own below) */}
+              {isFalProvider && !isCosmosProvider ? (
                 <p className="text-xs text-violet-300/70">
                   fal.ai &middot; $0.10/sec &middot; {duration}s = ${(duration * 0.10).toFixed(2)} &middot; Safety filter disabled
                 </p>
@@ -472,11 +678,12 @@ export function StudioCreateView() {
               {/* Image upload for I2V modes — 1 start frame (JPEG/PNG/BMP/WEBP, max 20 MB) */}
               {videoProvider === "fal" ||
                 videoProvider === "fal-i2v-2.7" ||
+                isCosmosProvider ||
                 isAtlasI2V ||
                 (videoProvider === "runpod" && videoMode === "i2v") ? (
                 <div>
                   <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">
-                    Start Frame Image {videoProvider === "fal-i2v-2.7" ? "(optional, 1 image)" : "(1 image)"}
+                    {isCosmosProvider ? "Conditioning First Frame (1 image, required)" : `Start Frame Image ${videoProvider === "fal-i2v-2.7" ? "(optional, 1 image)" : "(1 image)"}`}
                   </label>
                   <input
                     type="file"
@@ -486,6 +693,11 @@ export function StudioCreateView() {
                   />
                   {videoProvider === "fal-i2v-2.7" ? (
                     <p className="mt-1 text-xs text-cyan-200/50">JPEG, PNG, BMP, or WEBP — max 20 MB. Mutually exclusive with the video clip below.</p>
+                  ) : null}
+                  {isCosmosProvider ? (
+                    <p className="mt-1 text-xs text-cyan-200/50">
+                      Cosmos 3 generates motion starting from this exact frame. JPEG, PNG, WEBP, or BMP — max 20 MB. The Reasoner (prompt expansion) also looks at this image.
+                    </p>
                   ) : null}
                   {isAtlasI2V ? (
                     <p className="mt-1 text-xs text-cyan-200/50">
@@ -602,6 +814,175 @@ export function StudioCreateView() {
                     ) : null}
                   </div>
                 </>
+              ) : null}
+
+              {/* ── Cosmos 3 Super config panel (NVIDIA via fal.ai) ── */}
+              {isCosmosProvider ? (
+                <div className="space-y-4 rounded-2xl border border-sky-300/25 bg-sky-950/20 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-sky-100/35 bg-sky-300/10 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-sky-100">
+                      NVIDIA · Cosmos 3 Super
+                    </span>
+                    <span className="text-xs text-sky-200/70">
+                      $0.05/sec &middot; {(cosmosNumFrames / cosmosFps).toFixed(1)}s &asymp; $
+                      {((cosmosNumFrames / cosmosFps) * 0.05 * (cosmosAgentic ? cosmosAgenticIterations * cosmosAgenticSamples : 1)).toFixed(2)}
+                      {cosmosAgentic ? " (agentic — billed per candidate)" : ""}
+                    </span>
+                    <span className="text-[11px] text-sky-200/60">Safety filter disabled</span>
+                  </div>
+
+                  {/* Output size tier */}
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-sky-200/80">Output Size</label>
+                    <div className="flex flex-wrap gap-2">
+                      {COSMOS_TIERS.map((tier) => (
+                        <button
+                          key={tier.value}
+                          type="button"
+                          className={pill(cosmosTier === tier.value)}
+                          onClick={() => setCosmosTier(tier.value)}
+                        >
+                          {tier.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-sky-200/60">Clamped and snapped to the nearest supported NVIDIA tier (256p / 480p / 720p).</p>
+                  </div>
+
+                  {/* Video length: num_frames + fps */}
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-sky-200/80">
+                      Video Length — {cosmosNumFrames} frames @ {cosmosFps} fps = {(cosmosNumFrames / cosmosFps).toFixed(1)}s
+                    </label>
+                    <input
+                      type="range"
+                      min={5}
+                      max={189}
+                      step={1}
+                      value={cosmosNumFrames}
+                      onChange={(event) => setCosmosNumFrames(Number(event.target.value))}
+                      className="w-full accent-sky-300"
+                    />
+                    <label className="mt-3 mb-1 block text-xs uppercase tracking-[0.2em] text-sky-200/80">Frames per second: {cosmosFps}</label>
+                    <input
+                      type="range"
+                      min={4}
+                      max={60}
+                      step={1}
+                      value={cosmosFps}
+                      onChange={(event) => setCosmosFps(Number(event.target.value))}
+                      className="w-full accent-sky-300"
+                    />
+                    <p className="mt-1 text-xs text-sky-200/60">num_frames 5–189 &divide; frames_per_second 4–60 sets the clip length.</p>
+                  </div>
+
+                  {/* Inference steps */}
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-sky-200/80">Inference Steps: {cosmosSteps}</label>
+                    <input
+                      type="range"
+                      min={1}
+                      max={50}
+                      step={1}
+                      value={cosmosSteps}
+                      onChange={(event) => setCosmosSteps(Number(event.target.value))}
+                      className="w-full accent-sky-300"
+                    />
+                    <p className="mt-1 text-xs text-sky-200/60">More steps = higher quality but slower. Default 28.</p>
+                  </div>
+
+                  {/* Guidance scale */}
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-sky-200/80">Guidance Scale: {cosmosGuidance}</label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={20}
+                      step={0.5}
+                      value={cosmosGuidance}
+                      onChange={(event) => setCosmosGuidance(Number(event.target.value))}
+                      className="w-full accent-sky-300"
+                    />
+                    <p className="mt-1 text-xs text-sky-200/60">Higher = stronger prompt adherence, less diversity. Default 6.</p>
+                  </div>
+
+                  {/* Prompt expansion (Reasoner) */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      className={pill(enablePromptExpansion, "amber")}
+                      onClick={() => setEnablePromptExpansion(!enablePromptExpansion)}
+                    >
+                      Prompt Expansion: {enablePromptExpansion ? "ON" : "OFF"}
+                    </button>
+                    <span className="text-xs text-sky-200/60">Cosmos3-Nano Reasoner (a VLM that sees the first frame) rewrites your prompt into the dense caption Cosmos was trained on.</span>
+                  </div>
+
+                  {/* Agentic generation loop */}
+                  <div className="space-y-3 rounded-xl border border-sky-300/20 bg-slate-900/40 p-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        className={pill(cosmosAgentic, "amber")}
+                        onClick={() => setCosmosAgentic(!cosmosAgentic)}
+                      >
+                        Agentic Generation: {cosmosAgentic ? "ON" : "OFF"}
+                      </button>
+                      <span className="text-xs text-sky-200/60">Iterative loop: upsample → render candidates → VLM critique → rewrite. Substantially slower & costlier (each candidate is a full render).</span>
+                    </div>
+                    {cosmosAgentic ? (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-sky-200/80">Max Iterations: {cosmosAgenticIterations}</label>
+                          <div className="flex flex-wrap gap-2">
+                            {[1, 2, 3].map((n) => (
+                              <button key={n} type="button" className={pill(cosmosAgenticIterations === n)} onClick={() => setCosmosAgenticIterations(n)}>
+                                {n}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-sky-200/80">Candidates per Iteration: {cosmosAgenticSamples}</label>
+                          <div className="flex flex-wrap gap-2">
+                            {[1, 2, 3].map((n) => (
+                              <button key={n} type="button" className={pill(cosmosAgenticSamples === n)} onClick={() => setCosmosAgenticSamples(n)}>
+                                {n}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="mt-1 text-xs text-sky-200/60">The best candidate advances to the next rewrite stage.</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            type="button"
+                            className={pill(cosmosAgenticEarlyStop, "amber")}
+                            onClick={() => setCosmosAgenticEarlyStop(!cosmosAgenticEarlyStop)}
+                          >
+                            Early Stop: {cosmosAgenticEarlyStop ? "ON" : "OFF"}
+                          </button>
+                          <span className="text-xs text-sky-200/60">Stop the agent early once the critic score clears the strict quality threshold.</span>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+
+                  {/* Seed */}
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-sky-200/80">Seed (optional)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={2147483647}
+                      step={1}
+                      placeholder="Leave blank for random"
+                      value={seed}
+                      onChange={(event) => setSeed(event.target.value)}
+                      className="block w-full rounded-2xl border border-sky-200/25 bg-slate-900/70 p-3 text-sm"
+                    />
+                    <p className="mt-1 text-xs text-sky-200/60">Same seed + prompt + model version reproduces the same video.</p>
+                  </div>
+                </div>
               ) : null}
 
               {/* ── Atlas Cloud Seedance 2.0 config panel ── */}
@@ -1056,8 +1437,12 @@ export function StudioCreateView() {
             >
               Open Queue
             </a>
-            {flash ? (
-              <span className={`text-sm ${flash === "success" ? "text-emerald-300" : "text-rose-300"}`}>{flash}</span>
+            {flash === "success" ? (
+              <span className="text-sm text-emerald-300">
+                ✓ Submitted — generation started. Track it above; stay here to queue more.
+              </span>
+            ) : flash === "failure" ? (
+              <span className="text-sm text-rose-300">Submission failed.</span>
             ) : null}
             {error ? <span className="text-sm text-rose-300">{error}</span> : null}
           </div>
@@ -1081,9 +1466,11 @@ export function StudioCreateView() {
           <p>Video: WAN 2.6 T2V/I2V (RunPod) + WAN 2.6/2.7 on fal.ai + Seedance 2.0 (Atlas Cloud)</p>
           <p>Seedance 2.0 on Atlas Cloud: I2V, R2V (up to 9 images / 3 videos / 3 audio clips), T2V — plus Fast variants.</p>
           <p>Image: Wan 2.7 T2I/Edit/Pro (fal.ai) + Qwen + Flux + more</p>
+          <p>Video: NVIDIA Cosmos 3 Super I2V (fal.ai) — world-model generation with optional agentic refinement.</p>
           <p>Atlas Cloud backend supports realistic faces (relaxed moderation). Uploads are private signed URLs; outputs are re-hosted to Supabase storage before expiring.</p>
         </div>
       </article>
-    </section>
+      </section>
+    </div>
   );
 }
