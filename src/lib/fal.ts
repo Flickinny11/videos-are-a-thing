@@ -458,6 +458,7 @@ const extractMediaUrl = (resultBody: Record<string, unknown>, mode: string): str
 export const getFalJobStatus = async (
   mode: string,
   requestId: string,
+  urls?: { statusUrl?: string; responseUrl?: string },
 ): Promise<FalStatusResponse> => {
   if (!envServer.falKey) {
     throw new FalError({ error: "FAL_KEY is not configured." }, 401);
@@ -466,15 +467,25 @@ export const getFalJobStatus = async (
   const modelId = falModelIdForMode(mode);
   const authHeader = falAuthHeader();
 
+  // fal's submit response returns authoritative `status_url` / `response_url`.
+  // ALWAYS prefer those: fal's queue status/result endpoints live under the
+  // *application* id (e.g. `nvidia/cosmos-3-super`), NOT the full model path
+  // (`nvidia/cosmos-3-super/image-to-video`). Reconstructing with the full path
+  // returns HTTP 405 and the job never progresses. Reconstruction here is only a
+  // last-resort fallback for jobs that somehow lack the stored URLs.
+  const statusBaseUrl = urls?.statusUrl || `${FAL_QUEUE_BASE}/${modelId}/requests/${requestId}/status`;
+  const statusUrl = statusBaseUrl.includes("?") ? `${statusBaseUrl}&logs=1` : `${statusBaseUrl}?logs=1`;
+  const resultUrl = urls?.responseUrl || `${FAL_QUEUE_BASE}/${modelId}/requests/${requestId}`;
+  // Thread the URLs back into `raw` so later polls keep hitting the right
+  // endpoints even after the job's stored raw gets overwritten by status bodies.
+  const urlMeta = { status_url: statusBaseUrl, response_url: resultUrl };
+
   // Step 1: GET queue status with logs
-  const statusResponse = await fetch(
-    `${FAL_QUEUE_BASE}/${modelId}/requests/${requestId}/status?logs=1`,
-    {
-      method: "GET",
-      headers: { Authorization: authHeader },
-      cache: "no-store",
-    },
-  );
+  const statusResponse = await fetch(statusUrl, {
+    method: "GET",
+    headers: { Authorization: authHeader },
+    cache: "no-store",
+  });
 
   let statusBody: Record<string, unknown> = {};
   try {
@@ -518,14 +529,11 @@ export const getFalJobStatus = async (
 
   // Step 2: If COMPLETED, fetch the actual result
   if (mappedStatus === "COMPLETED") {
-    const resultResponse = await fetch(
-      `${FAL_QUEUE_BASE}/${modelId}/requests/${requestId}`,
-      {
-        method: "GET",
-        headers: { Authorization: authHeader },
-        cache: "no-store",
-      },
-    );
+    const resultResponse = await fetch(resultUrl, {
+      method: "GET",
+      headers: { Authorization: authHeader },
+      cache: "no-store",
+    });
 
     let resultBody: Record<string, unknown> = {};
     try {
@@ -548,7 +556,7 @@ export const getFalJobStatus = async (
       mediaUrl,
       seed,
       error: null,
-      raw: resultBody,
+      raw: { ...resultBody, ...urlMeta },
     };
   }
 
@@ -567,7 +575,7 @@ export const getFalJobStatus = async (
       mediaUrl: null,
       seed: null,
       error: errorMsg,
-      raw: statusBody,
+      raw: { ...statusBody, ...urlMeta },
     };
   }
 
@@ -578,7 +586,7 @@ export const getFalJobStatus = async (
     mediaUrl: null,
     seed: null,
     error: null,
-    raw: statusBody,
+    raw: { ...statusBody, ...urlMeta },
   };
 };
 

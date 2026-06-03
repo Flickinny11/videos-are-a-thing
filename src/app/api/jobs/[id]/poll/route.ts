@@ -224,7 +224,13 @@ export async function POST(
       // ── fal.ai polling ──
       let falStatus;
       try {
-        falStatus = await getFalJobStatus(current.mode, current.runpod_job_id);
+        // Use the authoritative status_url/response_url fal returned at submit
+        // (stored in runpod_raw, then threaded forward on every poll).
+        const falRaw = (current.runpod_raw || {}) as Record<string, unknown>;
+        falStatus = await getFalJobStatus(current.mode, current.runpod_job_id, {
+          statusUrl: typeof falRaw.status_url === "string" ? falRaw.status_url : undefined,
+          responseUrl: typeof falRaw.response_url === "string" ? falRaw.response_url : undefined,
+        });
       } catch (error) {
         const parsed = parsePollError(error);
 
