@@ -865,7 +865,7 @@ export function StudioCreateView() {
                     <input
                       type="range"
                       min={5}
-                      max={400}
+                      max={189}
                       step={1}
                       value={cosmosNumFrames}
                       onChange={(event) => setCosmosNumFrames(Number(event.target.value))}
@@ -881,7 +881,7 @@ export function StudioCreateView() {
                       onChange={(event) => setCosmosFps(Number(event.target.value))}
                       className="w-full accent-sky-300"
                     />
-                    <p className="mt-1 text-xs text-sky-200/60">num_frames 5–400 &divide; frames_per_second 4–60 sets the clip length (up to ~16.7s @ 24fps).</p>
+                    <p className="mt-1 text-xs text-sky-200/60">num_frames 5–189 &divide; frames_per_second 4–60 sets the clip length (fal caps this endpoint at 189 frames ≈ 7.9s @ 24fps).</p>
                   </div>
 
                   {/* Inference steps */}
