@@ -42,6 +42,8 @@ const MODEL_ENDPOINT_BY_MODE: Record<JobMode, string> = {
   "image:fal-t2i-2.7": "wan-v2.7-fal-t2i", // routed through fal.ai, not RunPod
   "image:fal-pro-t2i-2.7": "wan-v2.7-fal-pro-t2i", // routed through fal.ai, not RunPod
   "image:fal-seedream-edit-4.5": "seedream-v4.5-fal-edit", // routed through fal.ai, not RunPod
+  "image:fal-qwen-angles": "qwen-2511-multi-angles-fal", // routed through fal.ai, not RunPod
+  "image:fal-flux2-angles": "flux-2-multi-angles-fal", // routed through fal.ai, not RunPod
 };
 
 export interface RunpodStartRequest {

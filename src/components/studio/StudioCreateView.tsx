@@ -74,6 +74,78 @@ const COSMOS_TIERS: { value: string; label: string; width: number; height: numbe
   { value: "hd-4:3", label: "1024 HD · 4:3", width: 1024, height: 768 },
 ];
 
+// ── Wan "Perspective" faders → camera-control prompt language ──
+// Wan 2.7 Pro Edit has no native camera params, so each fader position is
+// translated into descriptive cinematography text. The composed sentence is
+// sent as (or appended to) the prompt — the same fader-driven control the
+// dedicated camera-angle models expose, applied to the Wan editor.
+interface PerspectiveState {
+  orbit: number; // -180..180 (azimuth: left/right around subject)
+  tilt: number; // -45..45   (elevation: + up/low-angle, - down/high-angle)
+  zoom: number; // -10..10   (+ closer/tighter, - wider)
+  roll: number; // -45..45   (dutch angle, + clockwise)
+  dolly: number; // -10..10  (+ push in, - pull back)
+  panX: number; // -10..10   (reframe left/right)
+  pedY: number; // -10..10   (reframe down/up)
+  scale: number; // 0.5..2   (subject size)
+  focal: number; // 14..200 mm (lens)
+}
+
+const PERSPECTIVE_DEFAULT: PerspectiveState = {
+  orbit: 0, tilt: 0, zoom: 0, roll: 0, dolly: 0, panX: 0, pedY: 0, scale: 1, focal: 50,
+};
+
+const buildPerspectivePrompt = (p: PerspectiveState): string => {
+  const clauses: string[] = [];
+  if (p.orbit !== 0)
+    clauses.push(`orbit the camera ${Math.abs(p.orbit)}° to the ${p.orbit > 0 ? "right" : "left"} around the subject`);
+  if (p.tilt !== 0)
+    clauses.push(
+      p.tilt > 0
+        ? `tilt the camera up ${Math.abs(p.tilt)}° for a low-angle shot looking up`
+        : `tilt the camera down ${Math.abs(p.tilt)}° for a high-angle shot looking down`,
+    );
+  if (p.zoom !== 0)
+    clauses.push(
+      p.zoom > 0
+        ? `zoom in ${Math.round(p.zoom * 10)}% tighter toward a close-up`
+        : `zoom out ${Math.round(Math.abs(p.zoom) * 10)}% to a wider shot`,
+    );
+  if (p.dolly !== 0)
+    clauses.push(p.dolly > 0 ? "dolly the camera in toward the subject" : "dolly the camera back away from the subject");
+  if (p.roll !== 0)
+    clauses.push(`roll the camera ${Math.abs(p.roll)}° ${p.roll > 0 ? "clockwise" : "counter-clockwise"} (dutch angle)`);
+  if (p.panX !== 0) clauses.push(`reframe the shot toward the ${p.panX > 0 ? "right" : "left"}`);
+  if (p.pedY !== 0) clauses.push(`reframe the shot ${p.pedY > 0 ? "upward" : "downward"}`);
+  if (p.scale !== 1) clauses.push(`render the subject ${p.scale.toFixed(2)}× its current size in frame`);
+  if (p.focal !== 50) {
+    const lens = p.focal <= 24 ? "wide-angle" : p.focal >= 85 ? "telephoto" : "standard";
+    clauses.push(`shoot on a ${Math.round(p.focal)}mm ${lens} lens`);
+  }
+  if (clauses.length === 0) return "";
+  return `Keep the same subject, lighting, and style; change only the camera: ${clauses.join("; ")}.`;
+};
+
+function PerspectiveSlider(props: {
+  label: string; min: number; max: number; step: number; value: number;
+  onChange: (value: number) => void; unit?: string; hint?: string;
+}) {
+  const { label, min, max, step, value, onChange, unit = "", hint } = props;
+  return (
+    <div>
+      <label className="mb-1 block text-xs uppercase tracking-[0.18em] text-violet-200/80">
+        {label} — {value}{unit}
+      </label>
+      <input
+        type="range" min={min} max={max} step={step} value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="w-full accent-violet-300"
+      />
+      {hint ? <p className="mt-1 text-[11px] text-violet-200/55">{hint}</p> : null}
+    </div>
+  );
+}
+
 export function StudioCreateView() {
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
@@ -129,6 +201,26 @@ export function StudioCreateView() {
   const [numImages, setNumImages] = useState(1);
   const [maxImages, setMaxImages] = useState(1);
 
+  // Camera-angle models (Qwen 2511 / FLUX 2 Multiple Angles)
+  const [angleHorizontal, setAngleHorizontal] = useState(0);
+  const [angleVertical, setAngleVertical] = useState(0);
+  const [angleZoom, setAngleZoom] = useState(5);
+  const [angleLoraScale, setAngleLoraScale] = useState(1);
+  const [angleGuidance, setAngleGuidance] = useState(4.5);
+  const [angleSteps, setAngleSteps] = useState(28);
+  const [angleAcceleration, setAngleAcceleration] = useState<"none" | "regular">("regular");
+  const [angleOutputFormat, setAngleOutputFormat] = useState<"png" | "jpeg" | "webp">("png");
+  const [angleNumImages, setAngleNumImages] = useState(1);
+  const [angleImageSize, setAngleImageSize] = useState<string>(""); // "" = match input image
+  const [angleCustomW, setAngleCustomW] = useState(1024);
+  const [angleCustomH, setAngleCustomH] = useState(1024);
+
+  // Wan 2.7 Pro/Edit "Perspective" faders → camera-control prompt text
+  const [perspectiveOpen, setPerspectiveOpen] = useState(false);
+  const [persp, setPersp] = useState<PerspectiveState>({ ...PERSPECTIVE_DEFAULT });
+  const setPerspField = (key: keyof PerspectiveState, value: number) =>
+    setPersp((prev) => ({ ...prev, [key]: value }));
+
   // Atlas Cloud Seedance extras
   const [atlasResolution, setAtlasResolution] = useState<AtlasResolution>("720p");
   const [atlasRatio, setAtlasRatio] = useState<AtlasRatio>("adaptive");
@@ -139,6 +231,10 @@ export function StudioCreateView() {
   const [atlasRefImages, setAtlasRefImages] = useState<File[]>([]);
   const [atlasRefVideos, setAtlasRefVideos] = useState<File[]>([]);
   const [atlasRefAudios, setAtlasRefAudios] = useState<File[]>([]);
+
+  const isAngleModel = imageModel === "qwen-angles" || imageModel === "flux2-angles";
+  const isWanEditModel = imageModel === "fal-edit-2.7" || imageModel === "fal-pro-edit-2.7";
+  const perspectiveText = buildPerspectivePrompt(persp);
 
   const isCosmosProvider = videoProvider === "fal-cosmos3-i2v";
   const isLtxProvider = videoProvider.startsWith("ltx-");
@@ -198,6 +294,7 @@ export function StudioCreateView() {
         "fal-t2i-2.7", "fal-pro-t2i-2.7",
         "fal-edit-2.7", "fal-pro-edit-2.7",
         "fal-seedream-edit-4.5",
+        "qwen-angles", "flux2-angles",
       ];
       if (noSourceFileModels.includes(imageModel)) return false;
       return true;
@@ -318,8 +415,17 @@ export function StudioCreateView() {
         return;
       }
     } else {
-      if (!prompt.trim()) {
-        setError("Prompt is required.");
+      // Prompt is optional for the camera-angle models (they build their own
+      // prompt from the sliders) and for the Wan editor when the Perspective
+      // faders are providing the instruction.
+      const promptOptionalNow =
+        isAngleModel || (isWanEditModel && perspectiveOpen && perspectiveText.length > 0);
+      if (!promptOptionalNow && !prompt.trim()) {
+        setError("Prompt is required (or use the Perspective / angle controls).");
+        return;
+      }
+      if (isAngleModel && editImages.length === 0) {
+        setError("Please upload an input image for camera-angle control.");
         return;
       }
       if (fileRequired && !sourceFile) {
@@ -331,8 +437,15 @@ export function StudioCreateView() {
     setIsSubmitting(true);
 
     try {
+      // When the Wan editor's Perspective faders are in use, fold the generated
+      // camera-control sentence into the prompt (it can stand alone).
+      const finalPrompt =
+        isWanEditModel && perspectiveOpen && perspectiveText
+          ? [perspectiveText, prompt.trim()].filter(Boolean).join(" ")
+          : prompt.trim();
+
       const body = new FormData();
-      body.set("prompt", prompt.trim());
+      body.set("prompt", finalPrompt);
       if (negativePrompt.trim()) body.set("negativePrompt", negativePrompt.trim());
       body.set("mediaType", mediaType);
       body.set("videoMode", videoProvider === "fal" ? "i2v" : videoMode);
@@ -433,6 +546,26 @@ export function StudioCreateView() {
           body.set("maxImages", String(maxImages));
           editImages.forEach((file, i) => body.append(`editImage_${i}`, file));
         }
+      }
+
+      // Camera-angle models (Qwen 2511 / FLUX 2 Multiple Angles)
+      if (mediaType === "image" && isAngleModel) {
+        editImages.forEach((file, i) => body.append(`editImage_${i}`, file));
+        body.set("angleHorizontal", String(angleHorizontal));
+        body.set("angleVertical", String(angleVertical));
+        body.set("angleZoom", String(angleZoom));
+        body.set("angleLoraScale", String(angleLoraScale));
+        body.set("angleGuidanceScale", String(angleGuidance));
+        body.set("angleNumInferenceSteps", String(angleSteps));
+        body.set("angleNumImages", String(angleNumImages));
+        body.set("angleAcceleration", angleAcceleration);
+        body.set("angleOutputFormat", angleOutputFormat);
+        body.set("angleImageSize", angleImageSize);
+        if (angleImageSize === "custom") {
+          body.set("angleCustomWidth", String(angleCustomW));
+          body.set("angleCustomHeight", String(angleCustomH));
+        }
+        if (seed.trim()) body.set("seed", seed.trim());
       }
 
       const response = await fetch("/api/jobs", {
@@ -1390,8 +1523,24 @@ export function StudioCreateView() {
               <select
                 className="w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
                 value={imageModel}
-                onChange={(event) => setImageModel(event.target.value)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setImageModel(value);
+                  // Seed each camera-angle model with its own recommended defaults.
+                  if (value === "flux2-angles") {
+                    setAngleVertical((v) => Math.min(60, Math.max(0, v)));
+                    setAngleGuidance(2.5);
+                    setAngleSteps(40);
+                  } else if (value === "qwen-angles") {
+                    setAngleGuidance(4.5);
+                    setAngleSteps(28);
+                  }
+                }}
               >
+                <optgroup label="Camera-Angle Control (fal.ai)">
+                  <option value="flux2-angles">FLUX 2 Multi-Angle ✦ newest (fal.ai)</option>
+                  <option value="qwen-angles">Qwen 2511 Multi-Angle (fal.ai, $0.035/MP)</option>
+                </optgroup>
                 <optgroup label="Wan 2.7 fal.ai - Text-to-Image">
                   <option value="fal-t2i-2.7">Wan 2.7 T2I (fal.ai, $0.03)</option>
                   <option value="fal-pro-t2i-2.7">Wan 2.7 Pro T2I (fal.ai, premium)</option>
@@ -1418,6 +1567,229 @@ export function StudioCreateView() {
                   <option value="z-turbo">Z-Image Turbo (i2i)</option>
                 </optgroup>
               </select>
+
+              {/* ── Camera-angle control panel (Qwen 2511 / FLUX 2 Multiple Angles) ── */}
+              {isAngleModel ? (
+                <div className="space-y-4 rounded-2xl border border-fuchsia-300/25 bg-fuchsia-950/20 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-fuchsia-100/35 bg-fuchsia-300/10 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-fuchsia-100">
+                      {imageModel === "flux2-angles" ? "FLUX 2 · Multi-Angle" : "Qwen 2511 · Multi-Angle"}
+                    </span>
+                    <span className="text-xs text-fuchsia-200/70">
+                      {imageModel === "flux2-angles" ? "Newest camera-control LoRA" : "$0.035 / megapixel"} · azimuth + elevation + zoom
+                    </span>
+                    <span className="text-[11px] text-emerald-200/70">Safety filter disabled</span>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">Input Image (required, 1)</label>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/bmp,.png,.jpg,.jpeg,.webp,.bmp"
+                      className="block w-full rounded-2xl border border-fuchsia-100/25 bg-slate-900/70 p-3 text-sm"
+                      onChange={(event) => setEditImages(event.target.files?.[0] ? [event.target.files[0]] : [])}
+                    />
+                    <p className="mt-1 text-xs text-fuchsia-200/50">The photo whose camera angle you want to change.</p>
+                    {editImages.length > 0 ? (
+                      <p className="mt-1 text-xs text-emerald-300/70">{editImages.length} image selected</p>
+                    ) : null}
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">
+                      Horizontal Angle (azimuth) — {angleHorizontal}°
+                    </label>
+                    <input type="range" min={0} max={360} step={1} value={angleHorizontal}
+                      onChange={(e) => setAngleHorizontal(Number(e.target.value))} className="w-full accent-fuchsia-300" />
+                    <p className="mt-1 text-[11px] text-fuchsia-200/60">0°=front · 90°=right side · 180°=back · 270°=left · 360°=front.</p>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">
+                      Vertical Angle (elevation) — {angleVertical}°
+                    </label>
+                    <input
+                      type="range"
+                      min={imageModel === "flux2-angles" ? 0 : -30}
+                      max={imageModel === "flux2-angles" ? 60 : 90}
+                      step={1}
+                      value={angleVertical}
+                      onChange={(e) => setAngleVertical(Number(e.target.value))}
+                      className="w-full accent-fuchsia-300"
+                    />
+                    <p className="mt-1 text-[11px] text-fuchsia-200/60">
+                      {imageModel === "flux2-angles"
+                        ? "0°=eye-level · 30°=elevated · 60°=high-angle (looking down)."
+                        : "-30°=low-angle (looking up) · 0°=eye-level · 30°=elevated · 60°=high · 90°=bird's-eye."}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">Zoom / Distance — {angleZoom}</label>
+                    <input type="range" min={0} max={10} step={0.5} value={angleZoom}
+                      onChange={(e) => setAngleZoom(Number(e.target.value))} className="w-full accent-fuchsia-300" />
+                    <p className="mt-1 text-[11px] text-fuchsia-200/60">0=wide shot (far) · 5=medium · 10=close-up (very close).</p>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">LoRA Scale — {angleLoraScale}</label>
+                      <input type="range" min={0} max={4} step={0.05} value={angleLoraScale}
+                        onChange={(e) => setAngleLoraScale(Number(e.target.value))} className="w-full accent-fuchsia-300" />
+                      <p className="mt-1 text-[11px] text-fuchsia-200/60">Strength of the camera-control effect (1 = default).</p>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">Guidance (CFG) — {angleGuidance}</label>
+                      <input type="range" min={1} max={20} step={0.5} value={angleGuidance}
+                        onChange={(e) => setAngleGuidance(Number(e.target.value))} className="w-full accent-fuchsia-300" />
+                      <p className="mt-1 text-[11px] text-fuchsia-200/60">Higher = stronger prompt adherence.</p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">Inference Steps — {angleSteps}</label>
+                      <input type="range" min={1} max={50} step={1} value={angleSteps}
+                        onChange={(e) => setAngleSteps(Number(e.target.value))} className="w-full accent-fuchsia-300" />
+                      <p className="mt-1 text-[11px] text-fuchsia-200/60">More steps = higher quality, slower.</p>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">Number of Images</label>
+                      <div className="flex flex-wrap gap-2">
+                        {[1, 2, 3, 4].map((n) => (
+                          <button key={n} type="button" className={pill(angleNumImages === n)} onClick={() => setAngleNumImages(n)}>
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">Acceleration</label>
+                      <div className="flex flex-wrap gap-2">
+                        {(["regular", "none"] as const).map((a) => (
+                          <button key={a} type="button" className={pill(angleAcceleration === a)} onClick={() => setAngleAcceleration(a)}>
+                            {a}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="mt-1 text-[11px] text-fuchsia-200/60">&quot;regular&quot; is faster; &quot;none&quot; can be slightly higher quality.</p>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">Output Format</label>
+                      <div className="flex flex-wrap gap-2">
+                        {(["png", "jpeg", "webp"] as const).map((f) => (
+                          <button key={f} type="button" className={pill(angleOutputFormat === f)} onClick={() => setAngleOutputFormat(f)}>
+                            {f}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">Output Image Size</label>
+                    <select
+                      className="w-full rounded-2xl border border-fuchsia-100/25 bg-slate-900/70 p-3 text-sm"
+                      value={angleImageSize}
+                      onChange={(e) => setAngleImageSize(e.target.value)}
+                    >
+                      <option value="">Match input image (default)</option>
+                      <option value="square_hd">Square HD (1024²)</option>
+                      <option value="square">Square (512²)</option>
+                      <option value="portrait_4_3">Portrait 4:3</option>
+                      <option value="portrait_16_9">Portrait 16:9</option>
+                      <option value="landscape_4_3">Landscape 4:3</option>
+                      <option value="landscape_16_9">Landscape 16:9</option>
+                      <option value="custom">Custom (set width × height)…</option>
+                    </select>
+                    {angleImageSize === "custom" ? (
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <label className="text-[11px] text-fuchsia-200/70">
+                          Width
+                          <input type="number" min={256} max={4096} step={8} value={angleCustomW}
+                            onChange={(e) => setAngleCustomW(Number(e.target.value))}
+                            className="mt-1 block w-full rounded-xl border border-fuchsia-100/25 bg-slate-900/70 p-2 text-sm" />
+                        </label>
+                        <label className="text-[11px] text-fuchsia-200/70">
+                          Height
+                          <input type="number" min={256} max={4096} step={8} value={angleCustomH}
+                            onChange={(e) => setAngleCustomH(Number(e.target.value))}
+                            className="mt-1 block w-full rounded-xl border border-fuchsia-100/25 bg-slate-900/70 p-2 text-sm" />
+                        </label>
+                      </div>
+                    ) : null}
+                    <p className="mt-1 text-[11px] text-fuchsia-200/60">Leave on &quot;Match input&quot; to keep the source resolution.</p>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-fuchsia-200/80">Seed (optional)</label>
+                    <input type="number" min={0} max={2147483647} step={1} placeholder="Leave blank for random"
+                      value={seed} onChange={(e) => setSeed(e.target.value)}
+                      className="block w-full rounded-2xl border border-fuchsia-100/25 bg-slate-900/70 p-3 text-sm" />
+                  </div>
+
+                  <p className="text-[11px] text-fuchsia-200/55">
+                    The Prompt box above is optional here — it&apos;s appended to the auto-generated camera prompt
+                    {imageModel === "qwen-angles" ? "; the Negative Prompt is also honored." : "."}
+                  </p>
+                </div>
+              ) : null}
+
+              {/* ── Wan 2.7 Pro/Edit "Perspective" faders → camera-control prompt ── */}
+              {isWanEditModel ? (
+                <div>
+                  <button
+                    type="button"
+                    className={pill(perspectiveOpen, "violet")}
+                    onClick={() => setPerspectiveOpen((open) => !open)}
+                  >
+                    Perspective {perspectiveOpen ? "▴" : "▾"}
+                  </button>
+                  <span className="ml-3 text-xs text-violet-100/60">
+                    Optional camera faders — moving them builds a camera-control prompt for the Wan editor.
+                  </span>
+
+                  {perspectiveOpen ? (
+                    <div className="mt-3 space-y-4 rounded-2xl border border-violet-300/25 bg-violet-950/20 p-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] uppercase tracking-[0.2em] text-violet-200/80">Camera Perspective</span>
+                        <button type="button" className="text-[11px] text-violet-200/70 underline" onClick={() => setPersp({ ...PERSPECTIVE_DEFAULT })}>
+                          Reset
+                        </button>
+                      </div>
+
+                      <PerspectiveSlider label="Orbit (left ↔ right)" min={-180} max={180} step={5} value={persp.orbit}
+                        onChange={(v) => setPerspField("orbit", v)} unit="°" hint="Rotate around the subject. + right · - left." />
+                      <PerspectiveSlider label="Tilt (down ↔ up)" min={-45} max={45} step={1} value={persp.tilt}
+                        onChange={(v) => setPerspField("tilt", v)} unit="°" hint="+ up (low-angle) · - down (high-angle)." />
+                      <PerspectiveSlider label="Zoom (wide ↔ tight)" min={-10} max={10} step={1} value={persp.zoom}
+                        onChange={(v) => setPerspField("zoom", v)} hint="+ closer/tighter · - wider." />
+                      <PerspectiveSlider label="Dolly (back ↔ in)" min={-10} max={10} step={1} value={persp.dolly}
+                        onChange={(v) => setPerspField("dolly", v)} hint="Physically move the camera. + push in · - pull back." />
+                      <PerspectiveSlider label="Roll (dutch angle)" min={-45} max={45} step={1} value={persp.roll}
+                        onChange={(v) => setPerspField("roll", v)} unit="°" hint="Tilt the horizon. + clockwise · - counter-clockwise." />
+                      <PerspectiveSlider label="Reframe X (left ↔ right)" min={-10} max={10} step={1} value={persp.panX}
+                        onChange={(v) => setPerspField("panX", v)} hint="Shift framing horizontally." />
+                      <PerspectiveSlider label="Reframe Y (down ↔ up)" min={-10} max={10} step={1} value={persp.pedY}
+                        onChange={(v) => setPerspField("pedY", v)} hint="Shift framing vertically." />
+                      <PerspectiveSlider label="Subject Scale" min={0.5} max={2} step={0.05} value={persp.scale}
+                        onChange={(v) => setPerspField("scale", v)} unit="×" hint="Make the subject bigger/smaller in frame (1 = unchanged)." />
+                      <PerspectiveSlider label="Lens Focal Length" min={14} max={200} step={1} value={persp.focal}
+                        onChange={(v) => setPerspField("focal", v)} unit="mm" hint="≤24mm wide-angle · 50mm standard · ≥85mm telephoto." />
+
+                      <div className="rounded-xl border border-violet-300/20 bg-slate-900/50 p-3">
+                        <p className="text-[11px] uppercase tracking-[0.18em] text-violet-200/70">Prompt that will be sent</p>
+                        <p className="mt-1 text-xs text-violet-100/90">
+                          {perspectiveText || "Move a fader to generate camera instructions…"}
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               {/* fal.ai image model config options */}
               {["fal-t2i-2.7", "fal-pro-t2i-2.7", "fal-edit-2.7", "fal-pro-edit-2.7"].includes(imageModel) ? (

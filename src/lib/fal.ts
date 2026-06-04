@@ -39,6 +39,9 @@ const FAL_MODEL_IDS: Record<string, string> = {
   "image:fal-t2i-2.7": "fal-ai/wan/v2.7/text-to-image",
   "image:fal-pro-t2i-2.7": "fal-ai/wan/v2.7/pro/text-to-image",
   "image:fal-seedream-edit-4.5": "fal-ai/bytedance/seedream/v4.5/edit",
+  // Camera-angle control (LoRA) models
+  "image:fal-qwen-angles": "fal-ai/qwen-image-edit-2511-multiple-angles",
+  "image:fal-flux2-angles": "fal-ai/flux-2-lora-gallery/multiple-angles",
 };
 
 const falModelIdForMode = (mode: string): string => {
@@ -121,6 +124,32 @@ export interface FalStartRequest {
   maxImages?: number;
   /** Optional random seed for reproducibility */
   seed?: number;
+
+  // ── Camera-angle control (Qwen 2511 / FLUX 2 Multiple Angles) params ──
+  /** Horizontal rotation (azimuth) in degrees, 0-360. */
+  angleHorizontal?: number;
+  /** Vertical camera angle (elevation). Qwen: -30..90, FLUX 2: 0..60. */
+  angleVertical?: number;
+  /** Camera zoom/distance, 0 (wide) → 5 (medium) → 10 (close-up). */
+  angleZoom?: number;
+  /** LoRA strength — how strongly the camera effect is applied (0-4). */
+  angleLoraScale?: number;
+  /** Classifier-free guidance scale. */
+  angleGuidanceScale?: number;
+  /** Denoising/inference steps. */
+  angleNumInferenceSteps?: number;
+  /** Inference acceleration level. */
+  angleAcceleration?: "none" | "regular";
+  /** Output image format. */
+  angleOutputFormat?: "png" | "jpeg" | "webp";
+  /** Number of images to generate (1-4). */
+  angleNumImages?: number;
+  /** image_size: "" / "input" = match input image; an enum preset; or "custom". */
+  angleImageSize?: string;
+  /** Custom output width when angleImageSize === "custom". */
+  angleCustomWidth?: number;
+  /** Custom output height when angleImageSize === "custom". */
+  angleCustomHeight?: number;
 }
 
 export interface FalRunResponse {
@@ -359,6 +388,79 @@ const buildPayloadT2I = (input: FalStartRequest): Record<string, unknown> => {
   return payload;
 };
 
+/**
+ * Resolve image_size for the camera-angle models. Empty / "input" means "match
+ * the input image" (field omitted). "custom" sends explicit width/height; any
+ * other value is treated as a fal size enum preset.
+ */
+const applyAngleImageSize = (payload: Record<string, unknown>, input: FalStartRequest): void => {
+  const sz = (input.angleImageSize || "").trim();
+  if (!sz || sz === "input") return;
+  if (sz === "custom") {
+    payload.image_size = {
+      width: clampInt(input.angleCustomWidth, 256, 4096, 1024),
+      height: clampInt(input.angleCustomHeight, 256, 4096, 1024),
+    };
+    return;
+  }
+  payload.image_size = sz;
+};
+
+/**
+ * Qwen Image Edit 2511 — Multiple Angles LoRA.
+ * fal-ai/qwen-image-edit-2511-multiple-angles. Camera control via
+ * horizontal_angle (0-360), vertical_angle (-30..90), zoom (0-10). The app's
+ * prompt maps to the optional additional_prompt. Safety checker OFF.
+ */
+const buildPayloadQwenAngles = (input: FalStartRequest): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {
+    image_urls: input.imageUrls || [],
+    horizontal_angle: clampFloat(input.angleHorizontal, 0, 360, 0),
+    vertical_angle: clampFloat(input.angleVertical, -30, 90, 0),
+    zoom: clampFloat(input.angleZoom, 0, 10, 5),
+    lora_scale: clampFloat(input.angleLoraScale, 0, 4, 1),
+    guidance_scale: clampFloat(input.angleGuidanceScale, 1, 20, 4.5),
+    num_inference_steps: clampInt(input.angleNumInferenceSteps, 1, 50, 28),
+    acceleration: input.angleAcceleration === "none" ? "none" : "regular",
+    output_format: ["png", "jpeg", "webp"].includes(input.angleOutputFormat || "")
+      ? input.angleOutputFormat
+      : "png",
+    num_images: clampInt(input.angleNumImages, 1, 4, 1),
+    enable_safety_checker: false,
+  };
+  applyAngleImageSize(payload, input);
+  if (input.prompt) payload.additional_prompt = input.prompt;
+  if (input.negativePrompt) payload.negative_prompt = input.negativePrompt;
+  if (typeof input.seed === "number") payload.seed = input.seed;
+  return payload;
+};
+
+/**
+ * FLUX 2 LoRA Gallery — Multiple Angles (newest camera-control model).
+ * fal-ai/flux-2-lora-gallery/multiple-angles. horizontal_angle (0-360),
+ * vertical_angle (0..60), zoom (0-10). No additional/negative prompt. Safety OFF.
+ */
+const buildPayloadFlux2Angles = (input: FalStartRequest): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {
+    image_urls: input.imageUrls || [],
+    horizontal_angle: clampFloat(input.angleHorizontal, 0, 360, 0),
+    vertical_angle: clampFloat(input.angleVertical, 0, 60, 0),
+    zoom: clampFloat(input.angleZoom, 0, 10, 5),
+    lora_scale: clampFloat(input.angleLoraScale, 0, 4, 1),
+    guidance_scale: clampFloat(input.angleGuidanceScale, 1, 20, 2.5),
+    num_inference_steps: clampInt(input.angleNumInferenceSteps, 1, 50, 40),
+    acceleration: input.angleAcceleration === "none" ? "none" : "regular",
+    output_format: ["png", "jpeg", "webp"].includes(input.angleOutputFormat || "")
+      ? input.angleOutputFormat
+      : "png",
+    num_images: clampInt(input.angleNumImages, 1, 4, 1),
+    enable_safety_checker: false,
+  };
+  applyAngleImageSize(payload, input);
+  if (typeof input.seed === "number") payload.seed = input.seed;
+  return payload;
+};
+
 const buildPayload = (input: FalStartRequest): Record<string, unknown> => {
   if (isLtxMode(input.mode)) {
     return buildLtxPayload(input.mode, {
@@ -381,6 +483,10 @@ const buildPayload = (input: FalStartRequest): Record<string, unknown> => {
       return buildPayloadEdit(input);
     case "image:fal-seedream-edit-4.5":
       return buildPayloadSeedreamEdit(input);
+    case "image:fal-qwen-angles":
+      return buildPayloadQwenAngles(input);
+    case "image:fal-flux2-angles":
+      return buildPayloadFlux2Angles(input);
     case "image:fal-t2i-2.7":
     case "image:fal-pro-t2i-2.7":
       return buildPayloadT2I(input);
@@ -626,6 +732,8 @@ const FAL_MODEL_NAMES: Record<string, string> = {
   "image:fal-t2i-2.7": "wan-v2.7-fal-t2i",
   "image:fal-pro-t2i-2.7": "wan-v2.7-fal-pro-t2i",
   "image:fal-seedream-edit-4.5": "seedream-v4.5-fal-edit",
+  "image:fal-qwen-angles": "qwen-2511-multi-angles-fal",
+  "image:fal-flux2-angles": "flux-2-multi-angles-fal",
 };
 
 export const falModelName = (mode: string): string =>
