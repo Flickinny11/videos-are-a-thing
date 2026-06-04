@@ -37,7 +37,9 @@ export type JobMode =
   | "image:fal-pro-edit-2.7"
   | "image:fal-t2i-2.7"
   | "image:fal-pro-t2i-2.7"
-  | "image:fal-seedream-edit-4.5";
+  | "image:fal-seedream-edit-4.5"
+  | "image:fal-qwen-angles"
+  | "image:fal-flux2-angles";
 
 export type JobStatus =
   | "IN_QUEUE"

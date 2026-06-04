@@ -116,7 +116,10 @@ export async function POST(request: Request) {
     // in the LTX branch below.
     const ltxPromptOptional =
       isLtxMode(`video:${videoProvider}`) && LTX_MODELS[`video:${videoProvider}`]?.promptRequired === false;
-    if (!prompt && !ltxPromptOptional) return fail("Prompt is required.");
+    // Camera-angle models build their own prompt from the angle sliders.
+    const angleImageModel =
+      mediaType === "image" && (imageModel === "qwen-angles" || imageModel === "flux2-angles");
+    if (!prompt && !ltxPromptOptional && !angleImageModel) return fail("Prompt is required.");
     if (!["image", "video"].includes(mediaType)) return fail("mediaType must be image or video.");
 
     const duration = durationRaw >= 2 && durationRaw <= 15 ? durationRaw : 5;
@@ -172,6 +175,8 @@ export async function POST(request: Request) {
         "fal-t2i-2.7": "image:fal-t2i-2.7",
         "fal-pro-t2i-2.7": "image:fal-pro-t2i-2.7",
         "fal-seedream-edit-4.5": "image:fal-seedream-edit-4.5",
+        "qwen-angles": "image:fal-qwen-angles",
+        "flux2-angles": "image:fal-flux2-angles",
       };
       mode = imageModelMap[imageModel] || "image:flux-schnell";
     }
@@ -189,6 +194,7 @@ export async function POST(request: Request) {
       "image:fal-t2i-2.7", "image:fal-pro-t2i-2.7",
       "image:fal-edit-2.7", "image:fal-pro-edit-2.7",
       "image:fal-seedream-edit-4.5",
+      "image:fal-qwen-angles", "image:fal-flux2-angles",
     ];
     // LTX modes use their own per-task file fields (ltxfile_*), never the generic sourceFile.
     const fileRequired = !isLtxMode(mode) && !noSourceFileModes.includes(mode);
@@ -326,9 +332,13 @@ export async function POST(request: Request) {
       }
     }
 
-    // Handle fal.ai edit model image uploads (editImage_* fields)
+    // Handle fal.ai edit / camera-angle model image uploads (editImage_* fields)
     const editImageUrls: string[] = [];
-    if (mode === "image:fal-edit-2.7" || mode === "image:fal-pro-edit-2.7" || mode === "image:fal-seedream-edit-4.5") {
+    const editImageModes: JobMode[] = [
+      "image:fal-edit-2.7", "image:fal-pro-edit-2.7", "image:fal-seedream-edit-4.5",
+      "image:fal-qwen-angles", "image:fal-flux2-angles",
+    ];
+    if (editImageModes.includes(mode)) {
       for (const [key, value] of formData.entries()) {
         if (key.startsWith("editImage_") && value instanceof File && value.size > 0) {
           const upload = await saveUploadedInput({ userId: user.id, file: value });
@@ -336,7 +346,7 @@ export async function POST(request: Request) {
         }
       }
       if (editImageUrls.length === 0) {
-        return fail("At least one image is required for edit models.");
+        return fail("At least one input image is required for this model.");
       }
     }
 
@@ -385,6 +395,29 @@ export async function POST(request: Request) {
     const agenticSamplesPerIteration = mode === "video:fal-cosmos3-i2v"
       ? Number(formData.get("agenticSamplesPerIteration") || 2) : undefined;
     const agenticEarlyStop = formData.get("agenticEarlyStop") !== "false";
+
+    // ── Camera-angle (Qwen 2511 / FLUX 2 Multiple Angles) parameters ──
+    const angleNumOrUndef = (key: string): number | undefined => {
+      const raw = formData.get(key);
+      if (raw === null || String(raw).trim() === "") return undefined;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const angleHorizontal = angleNumOrUndef("angleHorizontal");
+    const angleVertical = angleNumOrUndef("angleVertical");
+    const angleZoom = angleNumOrUndef("angleZoom");
+    const angleLoraScale = angleNumOrUndef("angleLoraScale");
+    const angleGuidanceScale = angleNumOrUndef("angleGuidanceScale");
+    const angleNumInferenceSteps = angleNumOrUndef("angleNumInferenceSteps");
+    const angleNumImages = angleNumOrUndef("angleNumImages");
+    const angleAccelerationRaw = String(formData.get("angleAcceleration") || "regular").trim();
+    const angleAcceleration: "none" | "regular" = angleAccelerationRaw === "none" ? "none" : "regular";
+    const angleOutputFormatRaw = String(formData.get("angleOutputFormat") || "png").trim();
+    const angleOutputFormat: "png" | "jpeg" | "webp" =
+      angleOutputFormatRaw === "jpeg" || angleOutputFormatRaw === "webp" ? angleOutputFormatRaw : "png";
+    const angleImageSize = String(formData.get("angleImageSize") || "").trim();
+    const angleCustomWidth = angleNumOrUndef("angleCustomWidth");
+    const angleCustomHeight = angleNumOrUndef("angleCustomHeight");
 
     // Atlas-specific parameters (resolution 480/720p, ratio, audio, watermark).
     const atlasResolutionRaw = String(formData.get("atlasResolution") || "720p").trim();
@@ -527,6 +560,19 @@ export async function POST(request: Request) {
           agenticMaxIterations,
           agenticSamplesPerIteration,
           agenticEarlyStop,
+          // Camera-angle (Qwen 2511 / FLUX 2 Multiple Angles)
+          angleHorizontal,
+          angleVertical,
+          angleZoom,
+          angleLoraScale,
+          angleGuidanceScale,
+          angleNumInferenceSteps,
+          angleNumImages,
+          angleAcceleration,
+          angleOutputFormat,
+          angleImageSize,
+          angleCustomWidth,
+          angleCustomHeight,
         });
         providerJobId = falResult.requestId;
         providerStatus = falResult.status;
