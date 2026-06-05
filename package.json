@@ -17,6 +17,7 @@
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.99.1",
     "@vfx-js/core": "^0.8.0",
+    "better-sqlite3": "^11.10.0",
     "cannon-es": "^0.20.0",
     "clsx": "^2.1.1",
     "curtainsjs": "^8.1.6",
