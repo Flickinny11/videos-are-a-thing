@@ -3,6 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { envServer } from "@/lib/env/server";
 
+/** Reject after `ms` so a slow/hanging Supabase call can't stall the request. */
+const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
+  Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error("supabase-timeout")), ms)),
+  ]);
+
 /**
  * Refresh the Supabase session for the incoming request and report whether a
  * *valid* user is authenticated.
@@ -53,14 +60,17 @@ export const updateSession = async (request: NextRequest) => {
   });
 
   try {
-    // getUser() validates the JWT with Supabase Auth.
+    // getUser() validates the JWT with Supabase Auth. Race it against a hard
+    // timeout: if Supabase is slow/hanging (e.g. waking from a pause), we must
+    // NOT let the call hang past the Edge function's limit — that produces a
+    // "MIDDLEWARE_INVOCATION_FAILED" 504 that browsers then cache.
     const {
       data: { user },
-    } = await supabase.auth.getUser();
+    } = await withTimeout(supabase.auth.getUser(), 3500);
     return { response, user, authResolved: true };
   } catch {
-    // Network failure reaching Supabase Auth (e.g. a transient `fetch failed`).
-    // Let the request proceed without a routing decision rather than 504-ing.
+    // Network failure OR timeout reaching Supabase Auth. Let the request proceed
+    // without a routing decision rather than 504-ing.
     return { response, user: null, authResolved: false };
   }
 };
