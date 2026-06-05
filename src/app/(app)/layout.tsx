@@ -11,7 +11,12 @@ export default async function AuthenticatedAppLayout({
   let user = null;
   try {
     const supabase = await createSupabaseServerClient();
-    const { data } = await supabase.auth.getUser();
+    // Hard timeout so a slow/hanging Supabase call can't stall the render into a
+    // gateway timeout — degrade to "unauthenticated" and bounce to login.
+    const { data } = await Promise.race([
+      supabase.auth.getUser(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("supabase-timeout")), 4000)),
+    ]);
     user = data.user;
   } catch {
     // Couldn't reach Supabase to validate the session — treat as unauthenticated
