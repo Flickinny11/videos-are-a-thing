@@ -19,11 +19,18 @@ const redirectPreservingCookies = (request: NextRequest, pathname: string, base:
 };
 
 export async function middleware(request: NextRequest) {
-  const { response, user } = await updateSession(request);
+  const { response, user, authResolved } = await updateSession(request);
 
   const { pathname } = request.nextUrl;
   const isAuthRoute = pathname.startsWith("/login");
   const isApiRoute = pathname.startsWith("/api");
+
+  // If we couldn't reach Supabase to validate the session, don't make a routing
+  // decision — just let the request through. The page/layout will resolve auth
+  // (or the next request will), and a transient hiccup never 504s the site.
+  if (!authResolved) {
+    return response;
+  }
 
   // Unauthenticated (no valid session) and trying to reach a protected page →
   // send to the login form. API routes do their own auth and must not redirect.

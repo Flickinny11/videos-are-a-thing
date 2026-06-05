@@ -8,10 +8,17 @@ export default async function AuthenticatedAppLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch {
+    // Couldn't reach Supabase to validate the session — treat as unauthenticated
+    // and bounce to login instead of throwing a 500/504. (redirect() must stay
+    // outside the try: it works by throwing a control-flow signal internally.)
+    user = null;
+  }
 
   if (!user) {
     redirect("/login");
