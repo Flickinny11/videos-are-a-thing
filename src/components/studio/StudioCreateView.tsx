@@ -582,22 +582,11 @@ export function StudioCreateView() {
       // Add the freshly-submitted job to the in-progress tracker so it shows up
       // at the top of the page and starts polling — without leaving Studio.
       if (data.job) upsertJobs([data.job as JobResponse]);
-      setPrompt("");
-      setNegativePrompt("");
-      setSourceFile(null);
-      setAudioFile(null);
-      setEndImageFile(null);
-      setVideoClipFile(null);
-      setReferenceImages([]);
-      setReferenceVideos([]);
-      setEditImages([]);
-      setAtlasRefImages([]);
-      setAtlasRefVideos([]);
-      setAtlasRefAudios([]);
-      setLtxFiles({});
-      setSeed("");
-      // Intentionally NOT navigating to /queue — the user stays on Studio to
-      // fire more generations while watching status above.
+      // Intentionally keep the prompt, uploaded files, and every control exactly
+      // as they are after a successful submit. The page never navigates or
+      // reloads, so the form stays populated and the user can simply click
+      // Generate again to re-run the same prompt (or tweak one control and
+      // resubmit) without having to re-enter anything.
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unexpected submit error.");
       setFlash("failure");
