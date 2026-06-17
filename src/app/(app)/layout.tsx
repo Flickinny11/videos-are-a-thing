@@ -1,13 +1,21 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { ReactNode } from "react";
 
 import { AppExperienceShell } from "@/components/app/AppExperienceShell";
+import { SIMPLE_AUTH_COOKIE, verifySimpleAuthToken } from "@/lib/simple-auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function AuthenticatedAppLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: ReactNode;
 }>) {
+  const simpleUser = verifySimpleAuthToken((await cookies()).get(SIMPLE_AUTH_COOKIE)?.value);
+  if (simpleUser) {
+    return <AppExperienceShell userEmail={simpleUser.email}>{children}</AppExperienceShell>;
+  }
+
   let user = null;
   try {
     const supabase = await createSupabaseServerClient();

@@ -1,15 +1,18 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 
 import { EffectsErrorBoundary } from "@/components/app/EffectsErrorBoundary";
 import { OglNebulaBackground } from "@/components/effects/OglNebulaBackground";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
+  const initialError = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("error") || "";
+  }, []);
   const [email, setEmail] = useState("Logantbaird@gmail.com");
   const [password, setPassword] = useState("Kilkinny!982");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
   const [loading, setLoading] = useState(false);
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -18,9 +21,22 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const supabase = createSupabaseBrowserClient();
-      const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
-      if (authError) throw authError;
+      const formData = new FormData();
+      formData.set("email", email);
+      formData.set("password", password);
+
+      const response = await fetch("/auth/login", {
+        method: "POST",
+        body: formData,
+        headers: { "X-Requested-With": "fetch-login" },
+      });
+
+      const result = (await response.json()) as { success?: boolean; message?: string };
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Login failed.");
+      }
+
       // Hard navigation (not router.replace) so the server-rendered layout and
       // middleware see the freshly written auth cookies on the very next
       // request — a soft client transition can race the cookie write and bounce
@@ -38,6 +54,8 @@ export default function LoginPage() {
         <OglNebulaBackground />
       </EffectsErrorBoundary>
       <form
+        action="/auth/login"
+        method="post"
         onSubmit={onSubmit}
         className="w-full max-w-md rounded-3xl border border-cyan-200/20 bg-slate-950/60 p-6 text-slate-100 backdrop-blur-2xl"
       >
@@ -47,6 +65,7 @@ export default function LoginPage() {
         <label className="mb-2 block text-xs uppercase tracking-[0.18em]">Email</label>
         <input
           type="email"
+          name="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           autoComplete="email"
@@ -57,6 +76,7 @@ export default function LoginPage() {
         <label className="mb-2 block text-xs uppercase tracking-[0.18em]">Password</label>
         <input
           type="password"
+          name="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           autoComplete="current-password"

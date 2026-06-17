@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
+import { SIMPLE_AUTH_COOKIE, verifySimpleAuthToken } from "@/lib/simple-auth";
 import { updateSession } from "@/lib/supabase/middleware";
 
 /**
@@ -19,10 +20,13 @@ const redirectPreservingCookies = (request: NextRequest, pathname: string, base:
 };
 
 export async function middleware(request: NextRequest) {
-  const { response, user, authResolved } = await updateSession(request);
+  const simpleUser = verifySimpleAuthToken(request.cookies.get(SIMPLE_AUTH_COOKIE)?.value);
+  const { response, user, authResolved } = simpleUser
+    ? { response: NextResponse.next({ request }), user: simpleUser, authResolved: true }
+    : await updateSession(request);
 
   const { pathname } = request.nextUrl;
-  const isAuthRoute = pathname.startsWith("/login");
+  const isAuthRoute = pathname.startsWith("/login") || pathname.startsWith("/auth");
   const isApiRoute = pathname.startsWith("/api");
 
   // If we couldn't reach Supabase to validate the session, don't make a routing
