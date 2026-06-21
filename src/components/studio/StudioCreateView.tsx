@@ -25,6 +25,10 @@ type VideoProvider =
   | "fal-i2v-2.7"
   | "fal-r2v-2.7"
   | "fal-cosmos3-i2v"
+  | "hh-t2v"
+  | "hh-i2v"
+  | "hh-r2v"
+  | "hh-edit"
   | "ltx-t2v"
   | "ltx-t2v-fast"
   | "ltx-i2v"
@@ -175,6 +179,9 @@ export function StudioCreateView() {
   // Optional seed (both 2.7 video models + Cosmos)
   const [seed, setSeed] = useState<string>("");
 
+  // Happy Horse video-edit: how to handle the source video's audio.
+  const [audioSetting, setAudioSetting] = useState<"auto" | "origin">("auto");
+
   // ── Cosmos 3 Super I2V (NVIDIA, via fal.ai) ──
   const [cosmosNumFrames, setCosmosNumFrames] = useState<number>(189);
   const [cosmosFps, setCosmosFps] = useState<number>(24);
@@ -237,6 +244,12 @@ export function StudioCreateView() {
   const perspectiveText = buildPerspectivePrompt(persp);
 
   const isCosmosProvider = videoProvider === "fal-cosmos3-i2v";
+  // Happy Horse 1.0 family (Alibaba via fal.ai)
+  const isHappyHorse = videoProvider.startsWith("hh-");
+  const isHHt2v = videoProvider === "hh-t2v";
+  const isHHi2v = videoProvider === "hh-i2v";
+  const isHHr2v = videoProvider === "hh-r2v";
+  const isHHedit = videoProvider === "hh-edit";
   const isLtxProvider = videoProvider.startsWith("ltx-");
   const ltxModel = isLtxProvider ? LTX_MODELS[ltxModeForProvider(videoProvider)] : undefined;
 
@@ -283,6 +296,10 @@ export function StudioCreateView() {
         if (videoProvider === "fal-i2v-2.7") return false; // image is optional for 2.7 I2V
         if (videoProvider === "fal-cosmos3-i2v") return true; // conditioning first frame required
         if (videoProvider === "fal") return true;
+        if (videoProvider === "hh-t2v") return false; // text only
+        if (videoProvider === "hh-i2v") return true; // first frame image required
+        if (videoProvider === "hh-r2v") return false; // uses reference images
+        if (videoProvider === "hh-edit") return true; // source video required
         if (isAtlasI2V) return true; // Atlas i2v requires start image
         if (isAtlasR2V) return false; // uses atlasRefImages / atlasRefVideos
         if (isAtlasT2V) return false; // text only
@@ -305,9 +322,10 @@ export function StudioCreateView() {
   const durationOptions = useMemo(() => {
     if (videoProvider === "fal-r2v-2.7") return [2, 3, 4, 5, 6, 7, 8, 9, 10];
     if (videoProvider === "fal-i2v-2.7") return [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    if (isHappyHorse) return [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     if (isAtlasProvider) return [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     return [5, 10, 15];
-  }, [videoProvider, isAtlasProvider]);
+  }, [videoProvider, isAtlasProvider, isHappyHorse]);
 
   // ── In-progress request tracker + polling ──────────────────────────
   const mountedRef = useRef(true);
@@ -419,7 +437,9 @@ export function StudioCreateView() {
       // prompt from the sliders) and for the Wan editor when the Perspective
       // faders are providing the instruction.
       const promptOptionalNow =
-        isAngleModel || (isWanEditModel && perspectiveOpen && perspectiveText.length > 0);
+        isAngleModel ||
+        isHHi2v || // Happy Horse I2V only needs an image
+        (isWanEditModel && perspectiveOpen && perspectiveText.length > 0);
       if (!promptOptionalNow && !prompt.trim()) {
         setError("Prompt is required (or use the Perspective / angle controls).");
         return;
@@ -428,8 +448,16 @@ export function StudioCreateView() {
         setError("Please upload an input image for camera-angle control.");
         return;
       }
+      if (isHHr2v && referenceImages.length === 0) {
+        setError("Happy Horse Reference→Video needs at least one reference image.");
+        return;
+      }
+      if (isHHedit && !sourceFile) {
+        setError("Happy Horse Video Edit needs a source video.");
+        return;
+      }
       if (fileRequired && !sourceFile) {
-        setError("Please upload an input image.");
+        setError(isHHi2v ? "Please upload a first-frame image." : "Please upload an input image.");
         return;
       }
     }
@@ -481,6 +509,17 @@ export function StudioCreateView() {
       // Optional seed for all fal.ai Wan video models
       if ((videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7") && seed.trim()) {
         body.set("seed", seed.trim());
+      }
+
+      // Happy Horse 1.0 family (Alibaba via fal.ai)
+      if (isHappyHorse) {
+        // resolution + duration are already set above (shared selectors).
+        if (isHHt2v || isHHr2v) body.set("aspectRatio", aspectRatio);
+        if (isHHr2v || isHHedit) {
+          referenceImages.forEach((file, i) => body.append(`referenceImage_${i}`, file));
+        }
+        if (isHHedit) body.set("audioSetting", audioSetting);
+        if (seed.trim()) body.set("seed", seed.trim());
       }
 
       // Cosmos 3 Super I2V extras (NVIDIA via fal.ai)
@@ -601,6 +640,10 @@ export function StudioCreateView() {
     { value: "fal-i2v-2.7", label: "Wan 2.7 I2V (fal.ai)" },
     { value: "fal-r2v-2.7", label: "Wan 2.7 R2V (fal.ai)" },
     { value: "fal-cosmos3-i2v", label: "Cosmos 3 Super I2V (NVIDIA · fal.ai)" },
+    { value: "hh-t2v", label: "Happy Horse 1.0 Text→Video (fal.ai)" },
+    { value: "hh-i2v", label: "Happy Horse 1.0 Image→Video (fal.ai)" },
+    { value: "hh-r2v", label: "Happy Horse 1.0 Reference→Video (fal.ai)" },
+    { value: "hh-edit", label: "Happy Horse 1.0 Video Edit (fal.ai)" },
     { value: "ltx-t2v", label: "LTX 2.3 Text→Video" },
     { value: "ltx-t2v-fast", label: "LTX 2.3 Fast Text→Video" },
     { value: "ltx-i2v", label: "LTX 2.3 Image→Video" },
@@ -899,8 +942,8 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              {/* Aspect Ratio - R2V only */}
-              {videoProvider === "fal-r2v-2.7" ? (
+              {/* Aspect Ratio - Wan R2V + Happy Horse T2V/R2V */}
+              {videoProvider === "fal-r2v-2.7" || isHHt2v || isHHr2v ? (
                 <div>
                   <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Aspect Ratio</label>
                   <div className="flex flex-wrap gap-2">
@@ -957,15 +1000,25 @@ export function StudioCreateView() {
                 </p>
               ) : null}
 
+              {/* Happy Horse info / pricing hint */}
+              {isHappyHorse ? (
+                <p className="text-xs text-amber-300/80">
+                  Happy Horse 1.0 (Alibaba) · {resolution} native-audio video ·{" "}
+                  {resolution === "1080p" ? "$0.28" : "$0.14"}/sec · {duration}s = $
+                  {(duration * (resolution === "1080p" ? 0.28 : 0.14)).toFixed(2)} · Safety filter disabled
+                </p>
+              ) : null}
+
               {/* Image upload for I2V modes — 1 start frame (JPEG/PNG/BMP/WEBP, max 20 MB) */}
               {videoProvider === "fal" ||
                 videoProvider === "fal-i2v-2.7" ||
                 isCosmosProvider ||
+                isHHi2v ||
                 isAtlasI2V ||
                 (videoProvider === "runpod" && videoMode === "i2v") ? (
                 <div>
                   <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">
-                    {isCosmosProvider ? "Conditioning First Frame (1 image, required)" : `Start Frame Image ${videoProvider === "fal-i2v-2.7" ? "(optional, 1 image)" : "(1 image)"}`}
+                    {isCosmosProvider ? "Conditioning First Frame (1 image, required)" : isHHi2v ? "First Frame Image (1 image, required)" : `Start Frame Image ${videoProvider === "fal-i2v-2.7" ? "(optional, 1 image)" : "(1 image)"}`}
                   </label>
                   <input
                     type="file"
@@ -985,6 +1038,75 @@ export function StudioCreateView() {
                     <p className="mt-1 text-xs text-cyan-200/50">
                       Seedance 2.0 first frame. JPEG, PNG, BMP, or WEBP.
                     </p>
+                  ) : null}
+                  {isHHi2v ? (
+                    <p className="mt-1 text-xs text-cyan-200/50">
+                      First frame for Happy Horse animation. JPEG, PNG, BMP, or WEBP — min 300px, aspect 1:2.5–2.5:1, max 10 MB.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Happy Horse Video Edit — source video (required) + audio handling */}
+              {isHHedit ? (
+                <>
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-amber-200/80">Source Video (required)</label>
+                    <input
+                      type="file"
+                      accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
+                      className="block w-full rounded-2xl border border-amber-200/25 bg-slate-900/70 p-3 text-sm"
+                      onChange={(event) => setSourceFile(event.target.files?.[0] || null)}
+                    />
+                    <p className="mt-1 text-xs text-amber-200/50">
+                      The video to edit. MP4, MOV, or WEBM. Describe your edit in the prompt.
+                    </p>
+                    {sourceFile ? (
+                      <p className="mt-1 text-xs text-emerald-300/70">{sourceFile.name}</p>
+                    ) : null}
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-amber-200/80">Audio</label>
+                    <div className="flex flex-wrap gap-2">
+                      {([
+                        { v: "auto", l: "Auto (regenerate)" },
+                        { v: "origin", l: "Keep original" },
+                      ] as const).map(({ v, l }) => (
+                        <button
+                          key={v}
+                          type="button"
+                          className={pill(audioSetting === v, "amber")}
+                          onClick={() => setAudioSetting(v)}
+                        >
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
+              {/* Happy Horse Reference→Video / Video Edit — reference images */}
+              {isHHr2v || isHHedit ? (
+                <div>
+                  <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">
+                    Reference Images {isHHr2v ? "(required, 1+ for subjects/style)" : "(optional)"}
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/bmp,.png,.jpg,.jpeg,.webp,.bmp"
+                    multiple
+                    className="block w-full rounded-2xl border border-cyan-100/25 bg-slate-900/70 p-3 text-sm"
+                    onChange={(event) => {
+                      const files = event.target.files;
+                      if (files) setReferenceImages(Array.from(files));
+                    }}
+                  />
+                  <p className="mt-1 text-xs text-cyan-200/50">
+                    Subject/character/style references. JPEG, PNG, BMP, or WEBP.
+                  </p>
+                  {referenceImages.length > 0 ? (
+                    <p className="mt-1 text-xs text-emerald-300/70">{referenceImages.length} image(s) selected</p>
                   ) : null}
                 </div>
               ) : null}
@@ -1035,8 +1157,8 @@ export function StudioCreateView() {
                 </div>
               ) : null}
 
-              {/* Seed input - all fal.ai Wan video models */}
-              {(videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7") ? (
+              {/* Seed input - all fal.ai Wan + Happy Horse video models */}
+              {(videoProvider === "fal" || videoProvider === "fal-i2v-2.7" || videoProvider === "fal-r2v-2.7" || isHappyHorse) ? (
                 <div>
                   <label className="mb-1 block text-xs uppercase tracking-[0.2em] text-cyan-200/80">Seed (optional)</label>
                   <input

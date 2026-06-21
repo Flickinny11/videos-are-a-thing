@@ -119,7 +119,10 @@ export async function POST(request: Request) {
     // Camera-angle models build their own prompt from the angle sliders.
     const angleImageModel =
       mediaType === "image" && (imageModel === "qwen-angles" || imageModel === "flux2-angles");
-    if (!prompt && !ltxPromptOptional && !angleImageModel) return fail("Prompt is required.");
+    // Happy Horse image-to-video only requires an image; the prompt is optional.
+    const hhPromptOptional = mediaType === "video" && videoProvider === "hh-i2v";
+    if (!prompt && !ltxPromptOptional && !angleImageModel && !hhPromptOptional)
+      return fail("Prompt is required.");
     if (!["image", "video"].includes(mediaType)) return fail("mediaType must be image or video.");
 
     const duration = durationRaw >= 2 && durationRaw <= 15 ? durationRaw : 5;
@@ -136,6 +139,10 @@ export async function POST(request: Request) {
         "fal-i2v-2.7": "video:fal-i2v-2.7",
         "fal-r2v-2.7": "video:fal-r2v-2.7",
         "fal-cosmos3-i2v": "video:fal-cosmos3-i2v",
+        "hh-t2v": "video:hh-t2v",
+        "hh-i2v": "video:hh-i2v",
+        "hh-r2v": "video:hh-r2v",
+        "hh-edit": "video:hh-edit",
         "ltx-t2v": "video:ltx-t2v",
         "ltx-t2v-fast": "video:ltx-t2v-fast",
         "ltx-i2v": "video:ltx-i2v",
@@ -188,6 +195,8 @@ export async function POST(request: Request) {
     //   of start image or video for Atlas i2v below).
     const noSourceFileModes: JobMode[] = [
       "video:t2v", "video:fal-r2v-2.7", "video:fal-i2v-2.7",
+      // Happy Horse: t2v is text-only; r2v uses reference image uploads.
+      "video:hh-t2v", "video:hh-r2v",
       "video:atlas-seedance-r2v", "video:atlas-seedance-fast-r2v",
       "video:atlas-seedance-t2v", "video:atlas-seedance-fast-t2v",
       "image:flux-dev", "image:flux-schnell", "image:qwen-t2i",
@@ -234,7 +243,9 @@ export async function POST(request: Request) {
     const referenceVideoUrls: string[] = [];
     let endImageSignedUrl: string | undefined;
 
-    if (mode === "video:fal-r2v-2.7") {
+    // Wan 2.7 R2V and Happy Horse R2V / Video-Edit all accept multiple
+    // reference images uploaded as referenceImage_* form fields.
+    if (mode === "video:fal-r2v-2.7" || mode === "video:hh-r2v" || mode === "video:hh-edit") {
       // Collect multiple reference images
       for (const [key, value] of formData.entries()) {
         if (key.startsWith("referenceImage") && value instanceof File && value.size > 0) {
@@ -247,6 +258,11 @@ export async function POST(request: Request) {
         }
       }
     }
+
+    // Happy Horse video-edit treats the primary upload as the source video.
+    const happyHorseVideoEditUrl = mode === "video:hh-edit" ? inputSignedUrl : undefined;
+    const audioSettingRaw = String(formData.get("audioSetting") || "auto").trim();
+    const audioSetting: "auto" | "origin" = audioSettingRaw === "origin" ? "origin" : "auto";
 
     let videoClipSignedUrl: string | undefined;
     if (mode === "video:fal-i2v-2.7") {
@@ -543,6 +559,9 @@ export async function POST(request: Request) {
           referenceVideoUrls: referenceVideoUrls.length > 0 ? referenceVideoUrls : undefined,
           aspectRatio,
           multiShots,
+          // Happy Horse extras
+          videoEditUrl: happyHorseVideoEditUrl,
+          audioSetting,
           enablePromptExpansion,
           imageUrls: editImageUrls.length > 0 ? editImageUrls : undefined,
           imageSize: imageSizeRaw as import("@/lib/fal").FalImageSize,
