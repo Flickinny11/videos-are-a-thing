@@ -33,6 +33,11 @@ const FAL_MODEL_IDS: Record<string, string> = {
   "video:fal-i2v-2.7": "fal-ai/wan/v2.7/image-to-video",
   "video:fal-r2v-2.7": "fal-ai/wan/v2.7/reference-to-video",
   "video:fal-cosmos3-i2v": "nvidia/cosmos-3-super/image-to-video",
+  // Happy Horse 1.0 family (Alibaba, via fal.ai) — 1080p native-audio video
+  "video:hh-t2v": "alibaba/happy-horse/text-to-video",
+  "video:hh-i2v": "alibaba/happy-horse/image-to-video",
+  "video:hh-r2v": "alibaba/happy-horse/reference-to-video",
+  "video:hh-edit": "alibaba/happy-horse/video-edit",
   // Image models
   "image:fal-edit-2.7": "fal-ai/wan/v2.7/edit",
   "image:fal-pro-edit-2.7": "fal-ai/wan/v2.7/pro/edit",
@@ -88,6 +93,11 @@ export interface FalStartRequest {
   aspectRatio?: "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
   /** Wan 2.7 R2V: multi-shot segmentation */
   multiShots?: boolean;
+  // ── Happy Horse 1.0 family (alibaba/happy-horse/*) ──
+  /** Happy Horse video-edit: source video to edit (video_url). */
+  videoEditUrl?: string;
+  /** Happy Horse video-edit: how to treat audio — "auto" (regenerate) or "origin" (keep). */
+  audioSetting?: "auto" | "origin";
   // ── Cosmos 3 Super I2V params (nvidia/cosmos-3-super/image-to-video) ──
   /** Cosmos: number of frames to generate (5-189). With FPS, sets video length. */
   numFrames?: number;
@@ -348,6 +358,86 @@ const buildPayloadCosmos3I2V = (input: FalStartRequest): Record<string, unknown>
   return payload;
 };
 
+/**
+ * Happy Horse 1.0 family (Alibaba, via fal.ai). Shared rules:
+ *   - resolution: "720p" | "1080p" (default 1080p)
+ *   - duration: integer 3-15 seconds (default 5)
+ *   - aspect_ratio (t2v/r2v only): 16:9 | 9:16 | 1:1 | 4:3 | 3:4
+ *   - enable_safety_checker is FORCED OFF per product requirement.
+ */
+const HH_RESOLUTIONS = ["720p", "1080p"] as const;
+const HH_ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4"] as const;
+
+const hhResolution = (input: FalStartRequest): "720p" | "1080p" =>
+  (HH_RESOLUTIONS as readonly string[]).includes(input.resolution || "")
+    ? (input.resolution as "720p" | "1080p")
+    : "1080p";
+
+const hhDuration = (input: FalStartRequest): number => clampInt(Number(input.duration), 3, 15, 5);
+
+const hhAspectRatio = (input: FalStartRequest): string =>
+  (HH_ASPECT_RATIOS as readonly string[]).includes(input.aspectRatio || "")
+    ? (input.aspectRatio as string)
+    : "16:9";
+
+/** Happy Horse Text-to-Video — alibaba/happy-horse/text-to-video. */
+const buildPayloadHHTextToVideo = (input: FalStartRequest): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {
+    prompt: input.prompt,
+    resolution: hhResolution(input),
+    aspect_ratio: hhAspectRatio(input),
+    duration: hhDuration(input),
+    enable_safety_checker: false,
+  };
+  if (typeof input.seed === "number") payload.seed = input.seed;
+  return payload;
+};
+
+/** Happy Horse Image-to-Video — alibaba/happy-horse/image-to-video. */
+const buildPayloadHHImageToVideo = (input: FalStartRequest): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {
+    image_url: input.imageUrl,
+    resolution: hhResolution(input),
+    duration: hhDuration(input),
+    enable_safety_checker: false,
+  };
+  if (input.prompt) payload.prompt = input.prompt;
+  if (typeof input.seed === "number") payload.seed = input.seed;
+  return payload;
+};
+
+/** Happy Horse Reference-to-Video — alibaba/happy-horse/reference-to-video. */
+const buildPayloadHHReferenceToVideo = (input: FalStartRequest): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {
+    prompt: input.prompt,
+    image_urls: input.referenceImageUrls && input.referenceImageUrls.length > 0
+      ? input.referenceImageUrls
+      : input.imageUrls || [],
+    resolution: hhResolution(input),
+    aspect_ratio: hhAspectRatio(input),
+    duration: hhDuration(input),
+    enable_safety_checker: false,
+  };
+  if (typeof input.seed === "number") payload.seed = input.seed;
+  return payload;
+};
+
+/** Happy Horse Video-Edit — alibaba/happy-horse/video-edit (video-to-video). */
+const buildPayloadHHVideoEdit = (input: FalStartRequest): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {
+    video_url: input.videoEditUrl || input.videoUrl,
+    prompt: input.prompt,
+    resolution: hhResolution(input),
+    audio_setting: input.audioSetting === "origin" ? "origin" : "auto",
+    enable_safety_checker: false,
+  };
+  if (input.referenceImageUrls && input.referenceImageUrls.length > 0) {
+    payload.reference_image_urls = input.referenceImageUrls;
+  }
+  if (typeof input.seed === "number") payload.seed = input.seed;
+  return payload;
+};
+
 /** Wan 2.7 Edit & Pro Edit (image-to-image). */
 const buildPayloadEdit = (input: FalStartRequest): Record<string, unknown> => {
   const payload: Record<string, unknown> = {
@@ -478,6 +568,14 @@ const buildPayload = (input: FalStartRequest): Record<string, unknown> => {
       return buildPayloadV27R2V(input);
     case "video:fal-cosmos3-i2v":
       return buildPayloadCosmos3I2V(input);
+    case "video:hh-t2v":
+      return buildPayloadHHTextToVideo(input);
+    case "video:hh-i2v":
+      return buildPayloadHHImageToVideo(input);
+    case "video:hh-r2v":
+      return buildPayloadHHReferenceToVideo(input);
+    case "video:hh-edit":
+      return buildPayloadHHVideoEdit(input);
     case "image:fal-edit-2.7":
     case "image:fal-pro-edit-2.7":
       return buildPayloadEdit(input);
@@ -727,6 +825,10 @@ const FAL_MODEL_NAMES: Record<string, string> = {
   "video:fal-i2v-2.7": "wan-v2.7-fal-i2v",
   "video:fal-r2v-2.7": "wan-v2.7-fal-r2v",
   "video:fal-cosmos3-i2v": "cosmos-3-super-fal-i2v",
+  "video:hh-t2v": "happy-horse-1.0-t2v",
+  "video:hh-i2v": "happy-horse-1.0-i2v",
+  "video:hh-r2v": "happy-horse-1.0-r2v",
+  "video:hh-edit": "happy-horse-1.0-video-edit",
   "image:fal-edit-2.7": "wan-v2.7-fal-edit",
   "image:fal-pro-edit-2.7": "wan-v2.7-fal-pro-edit",
   "image:fal-t2i-2.7": "wan-v2.7-fal-t2i",

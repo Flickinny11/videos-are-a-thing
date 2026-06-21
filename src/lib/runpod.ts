@@ -10,6 +10,11 @@ const MODEL_ENDPOINT_BY_MODE: Record<JobMode, string> = {
   "video:fal-i2v-2.7": "wan-v2.7-fal-i2v", // routed through fal.ai, not RunPod
   "video:fal-r2v-2.7": "wan-v2.7-fal-r2v", // routed through fal.ai, not RunPod
   "video:fal-cosmos3-i2v": "cosmos-3-super-fal-i2v", // routed through fal.ai, not RunPod
+  // Happy Horse 1.0 family — routed through fal.ai, not RunPod
+  "video:hh-t2v": "happy-horse-1.0-t2v",
+  "video:hh-i2v": "happy-horse-1.0-i2v",
+  "video:hh-r2v": "happy-horse-1.0-r2v",
+  "video:hh-edit": "happy-horse-1.0-video-edit",
   // LTX-2.3 family — routed through fal.ai, not RunPod
   "video:ltx-t2v": "ltx-2.3-t2v",
   "video:ltx-t2v-fast": "ltx-2.3-t2v-fast",
